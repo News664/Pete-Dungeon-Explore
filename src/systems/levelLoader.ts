@@ -1,0 +1,73 @@
+/**
+ * levelLoader.ts — Initialises runtime GameState from a LevelDefinition
+ *
+ * Exports:
+ *   initGameState(levelDef, levelIndex): GameState
+ *   GameState: complete mutable runtime state for the current level
+ *   GamePhase: union of all valid game phases
+ *
+ * Invariants:
+ *   - GameState is the single source of truth for the running game.
+ *   - statueStates positions start from def.x/def.y.
+ *   - enemyStates facing starts from def.gazePattern.facing.
+ *   - messages is an append-only log (GameScene prepends new messages).
+ */
+import type { LevelDefinition } from '../types/level'
+import type { HiddenEnemyDefinition } from '../types/entity'
+import type { ItemType } from '../types/item'
+import type { Vec2 } from '../types/tile'
+import type { GazeTile } from '../types/gaze'
+import type { StatueState, EnemyState, ItemState } from '../types/state'
+
+export type GamePhase = 'playing' | 'inspecting' | 'push-pending' | 'game-over' | 'escaped'
+
+export interface GameState {
+  levelIndex: number
+  levelDef: LevelDefinition
+  playerPos: Vec2
+  petrification: number
+  turns: number
+  softLimitReached: boolean
+  inventory: ItemType[]
+  statueStates: StatueState[]
+  enemyStates: EnemyState[]
+  itemStates: ItemState[]
+  hiddenEnemies: HiddenEnemyDefinition[]
+  activeGazeTiles: GazeTile[]
+  messages: string[]
+  phase: GamePhase
+  inspectingStatue?: StatueState
+}
+
+export function initGameState(levelDef: LevelDefinition, levelIndex: number): GameState {
+  return {
+    levelIndex,
+    levelDef,
+    playerPos: { ...levelDef.playerStart },
+    petrification: 0,
+    turns: 0,
+    softLimitReached: false,
+    inventory: [],
+    statueStates: levelDef.statues.map(def => ({
+      def,
+      pos: { x: def.x, y: def.y },
+      isRestored: false,
+      unlockedStageIndex: 0,
+      turnsAdjacent: 0,
+    })),
+    enemyStates: levelDef.enemies.map(def => ({
+      def,
+      pos: { x: def.x, y: def.y },
+      facing: def.gazePattern.facing,
+    })),
+    itemStates: levelDef.items.map(ip => ({
+      pos: { ...ip.pos },
+      itemType: ip.itemType,
+      consumed: false,
+    })),
+    hiddenEnemies: [...levelDef.hiddenEnemies],
+    activeGazeTiles: [],
+    messages: [`You enter ${levelDef.name}.`],
+    phase: 'playing',
+  }
+}
