@@ -110,10 +110,20 @@ Each level's author decides per-statue.
 | 2: The Gallery | Pushable statues to block gaze |
 | 3: The Sanctuary | Softening Oil, restoration, soft turn limit pressure |
 
+### Inspect Action
+- Costs 1 turn (+1 petrification, or +2 after soft limit)
+- Opens a statue detail panel showing: name, material, pose, backstory, current memory stage text
+- Panel includes a portrait image slot
+  - Initial build: placeholder silhouette/colored rectangle
+  - Near-term: static pre-made artwork per statue
+  - Future: AI-generated portrait fetched at runtime (architecture must leave this slot swappable)
+- Trap statues trigger on inspect instead of showing the panel
+
 ### UI Requirements
 - Floor name, turns, petrification meter, stage, inventory
 - Message log: explains why petrification changed, which tiles are dangerous, what inspection reveals
 - Dangerous tiles highlighted (gaze overlay)
+- Statue detail panel (shown on inspect, dismissed on any key)
 
 ### Petrification Threshold Descriptions (flavor only, no mechanical effect yet)
 - 0–40%: Normal
