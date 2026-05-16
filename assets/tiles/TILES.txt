@@ -1,0 +1,22 @@
+TILE SPRITE SPECIFICATIONS — Escape from the Solid Labyrinth
+=============================================================
+
+Purpose
+-------
+Tile sprites replace the current coloured-rectangle placeholder rendering.
+This file describes the target spec for tile artwork.
+
+Canvas size:   48 × 48 pixels per tile
+Format:        PNG, tileable at edges
+Style:         Top-down dungeon stone, dark palette, subtle texture variation.
+
+Tile types and files
+---------------------
+floor.png     Dark stone floor. Subtle grout lines. Base colour ~#1e1e2e.
+wall.png      Stone wall block. Darker, raised-looking. Base colour ~#3a3a4a.
+exit.png      Glowing archway / floor glyph. Accent colour #00ff88.
+
+Placement
+---------
+Drop in this folder and load in GameScene.preload(). Replace Graphics fillRect
+calls with this.add.image() calls using the appropriate texture key.
