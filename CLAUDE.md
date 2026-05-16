@@ -37,6 +37,8 @@ Example (TypeScript):
 ### File Scanning
 When doing a first pass over the repo, read only the header block of each code file. Full file reads are reserved for files actively being modified or debugged.
 
+> **LOCKED:** Everything above the `## Game Design Reference` section is locked and must not be edited unless the user explicitly states and confirms the change.
+
 ---
 
 ## Game Design Reference
@@ -66,11 +68,26 @@ Every StatueEntity has:
 - `restorationCondition?: string`
 - `isPushable: boolean`
 - `isOpaque: boolean` — whether she blocks gaze rays
+- `isTrap: boolean` — if true, she is a mimic trap (see Trap Statues below)
 
-### Memory Stage Unlock Conditions (candidates, to be confirmed)
-- Stage 0: always available on inspect
-- Stage 1: inspect again after restoration, OR spend N turns adjacent
-- Stage 2: use a specific item (resonance scroll, etc.) — not in initial scope
+### Trap Statues
+Some statues are mimics — indistinguishable from real statues until interacted with or approached.
+- Trigger condition: inspect/push action, OR entering a tile within range 1 (short-range gaze variant)
+- On trigger: apply petrification to player; trap "activates" visually
+- Stage 0 memory of *nearby real statues* may hint that a trap is present
+- Mechanically defined the same as StatueEntity but with `isTrap: true` and a `trapGazeRange` field
+
+### Hidden Enemies
+Some enemies are dormant and only appear after the player steps on a specific trigger tile.
+- Defined in level data as `{ triggerTile: {x, y}, enemy: EnemyDefinition }`
+- Nearby statue memory stages can hint at their existence and location
+- On spawn: message log notifies the player; gaze overlay updates immediately
+
+### Memory Stage Unlock Conditions
+Each statue defines its own unlock conditions in data (condition-gated, per-statue). Conditions are extensible; current candidates:
+- Stage 0: always available on inspect (shows how she was petrified — mechanic hint)
+- Stage 1+: any of — restoration completed, N turns spent adjacent, specific item used, trigger tile stepped on, etc.
+- Deeper stages may hint at hidden enemies or future puzzle elements
 
 ### Materials (initial: marble only; extensible)
 - Marble: standard, pushable
@@ -82,8 +99,9 @@ Rare negative outcomes are valid (awakens enemy, blocks future path).
 Each level's author decides per-statue.
 
 ### Level Structure
-- 3 hand-authored levels for initial build
-- Level select screen planned (level count variable)
+- 3 hand-authored levels for initial build; level count is variable
+- Progression is linear (levels played in order)
+- Level select screen deferred — architecture must allow it to be added later without restructuring
 - Each level: compact puzzle, one new mechanic introduced
 
 | Level | Introduces |
