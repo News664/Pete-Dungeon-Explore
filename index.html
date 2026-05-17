@@ -130,6 +130,37 @@
     .inspection-text { color: #ccccdd; }
     #statue-close-hint { color: #555; font-size: 11px; margin-top: 8px; text-align: center; }
 
+    #interaction-menu-box {
+      background: #1a1a2e;
+      border: 1px solid #6644aa;
+      padding: 10px;
+      font-size: 13px;
+    }
+    #menu-header {
+      color: #aaaaee;
+      font-weight: bold;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+    .menu-option {
+      padding: 6px 8px;
+      color: #8888aa;
+      cursor: pointer;
+      border-radius: 3px;
+      margin-bottom: 3px;
+    }
+    .menu-option.selected {
+      background: #2a2a4e;
+      color: #eeeeff;
+      border-left: 3px solid #8866cc;
+    }
+    .menu-option:hover { background: #1e1e3a; }
+    .menu-hint {
+      color: #444;
+      font-size: 11px;
+      margin-top: 8px;
+    }
+
     #message-log-box {
       background: #1a1a2e;
       border: 1px solid #333;
@@ -244,8 +275,13 @@
       <div id="game"></div>
     </div>
 
-    <!-- RIGHT PANEL: statue inspect + message log -->
+    <!-- RIGHT PANEL: interaction menu + statue inspect + message log -->
     <div id="panel-right">
+      <div id="interaction-menu-box" style="display:none">
+        <div id="menu-header"></div>
+        <div id="menu-options-list"></div>
+        <div class="menu-hint">↑↓ select · Enter/Z confirm · Esc/X cancel</div>
+      </div>
       <div id="statue-panel-box">
         <div id="statue-portrait-box"><span>[portrait]</span></div>
         <div id="statue-name">—</div>
@@ -257,7 +293,7 @@
         <div id="message-log-title">— log —</div>
         <div id="message-list"></div>
       </div>
-      <div id="controls-hint">Arrow/WASD · I inspect · P push · U use</div>
+      <div id="controls-hint">Arrow/WASD move · Enter/Z interact · Esc cancel</div>
     </div>
   </div>
 
@@ -275,9 +311,10 @@
       <div></div>
     </div>
     <div id="action-btns">
+      <button class="action-btn" id="btn-confirm" style="background:#2a1a4e;border-color:#6644aa;color:#ccaaff">✓ Interact</button>
+      <button class="action-btn" id="btn-cancel">✕ Cancel</button>
       <button class="action-btn" id="btn-inspect">I Inspect</button>
-      <button class="action-btn" id="btn-push">P Push</button>
-      <button class="action-btn" id="btn-use">U Use</button>
+      <button class="action-btn" id="btn-use">U Use Oil</button>
     </div>
   </div>
 

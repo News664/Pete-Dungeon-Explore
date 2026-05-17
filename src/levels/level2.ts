@@ -90,7 +90,7 @@ export const level2: LevelDefinition = {
         type: 'cardinal-ray',
         facing: 'S',
         range: 8,
-        petrificationBonus: 3,
+        petrificationBonus: 30,
         ignoresWalls: false,
       },
     },

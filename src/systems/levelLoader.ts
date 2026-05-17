@@ -26,7 +26,7 @@ import type { Vec2 } from '../types/tile'
 import type { GazeTile, CardinalDirection } from '../types/gaze'
 import type { StatueState, EnemyState, ItemState, CompanionState } from '../types/state'
 
-export type GamePhase = 'playing' | 'inspecting' | 'push-pending' | 'game-over' | 'escaped'
+export type GamePhase = 'playing' | 'inspecting' | 'menu' | 'game-over' | 'escaped'
 
 export interface GameState {
   levelIndex: number

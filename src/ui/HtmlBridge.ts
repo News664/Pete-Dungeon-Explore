@@ -9,6 +9,9 @@
  *   showStatuePanel(statue, stage): populates and shows the right-panel statue inspect view
  *   hideStatuePanel(): hides statue panel
  *   pushMessage(text, type): prepends a message to the log ('normal'|'danger'|'good')
+ *   showMenu(title, options, selectedIndex): shows interaction menu with options
+ *   updateMenuSelection(selectedIndex): updates highlighted menu option
+ *   hideMenu(): hides interaction menu
  *
  * Invariants:
  *   - All DOM element lookups are cached in constructor (fail-fast if element missing).
@@ -37,6 +40,9 @@ export class HtmlBridge {
   private statueMeta: HTMLElement
   private inspectionLines: HTMLElement
   private msgList: HTMLElement
+  private menuBox: HTMLElement
+  private menuHeader: HTMLElement
+  private menuOptionsList: HTMLElement
 
   private messages: { text: string; type: MessageType }[] = []
 
@@ -56,6 +62,9 @@ export class HtmlBridge {
     this.statueMeta = this.el('statue-meta')
     this.inspectionLines = this.el('inspection-lines')
     this.msgList = this.el('message-list')
+    this.menuBox = this.el('interaction-menu-box')
+    this.menuHeader = this.el('menu-header')
+    this.menuOptionsList = this.el('menu-options-list')
   }
 
   private el(id: string): HTMLElement {
@@ -125,6 +134,29 @@ export class HtmlBridge {
 
   hideStatuePanel(): void {
     this.statuePanelBox.classList.remove('visible')
+  }
+
+  showMenu(title: string, options: string[], selectedIndex: number): void {
+    this.menuHeader.textContent = title
+    this.menuOptionsList.innerHTML = options
+      .map((opt, i) =>
+        `<div class="menu-option${i === selectedIndex ? ' selected' : ''}">${opt}</div>`
+      )
+      .join('')
+    ;(this.menuBox as HTMLElement).style.display = 'block'
+  }
+
+  updateMenuSelection(selectedIndex: number): void {
+    const divs = this.menuOptionsList.querySelectorAll('.menu-option')
+    divs.forEach((div, i) => {
+      div.classList.toggle('selected', i === selectedIndex)
+    })
+  }
+
+  hideMenu(): void {
+    ;(this.menuBox as HTMLElement).style.display = 'none'
+    this.menuHeader.textContent = ''
+    this.menuOptionsList.innerHTML = ''
   }
 
   pushMessage(text: string, type: MessageType = 'normal'): void {

@@ -4,10 +4,11 @@
  * Responsibilities:
  *   - Owns GameState (single source of truth)
  *   - Renders tile grid, player, statues, enemies, gaze overlay via Phaser Graphics
- *   - All UI (stats, messages, statue inspect panel) delegated to HtmlBridge
- *   - Handles keyboard input: arrows/WASD (move), I (inspect), P (push), U (use item)
+ *   - All UI (stats, messages, statue inspect panel, interaction menu) delegated to HtmlBridge
+ *   - Handles keyboard input: arrows/WASD (move), I (inspect shortcut), U (use-oil shortcut)
+ *   - Interaction with statues via unified menu (Enter/Z to open, ↑↓ to navigate, Enter/Z confirm)
  *   - Handles pointer-down click-to-move on canvas
- *   - Handles mobile control button wiring (btn-n/s/e/w, btn-inspect, btn-push, btn-use)
+ *   - Handles mobile control button wiring (btn-n/s/e/w, btn-confirm, btn-cancel, btn-inspect, btn-use)
  *   - Advances turns: action → companion move → gaze collision → petrification → re-render
  *   - Detects win (exit tile) and lose (petrification ≥ 100) conditions
  *   - Recomputes gaze each turn via computeGaze()
@@ -15,9 +16,9 @@
  *   - Companion logic: follows player; re-petrifies if caught in gaze (+40 petrification)
  *
  * Constants (pixels):
- *   TILE_SIZE = 48
+ *   TILE_SIZE = 64
  *   GRID_OFFSET_X = 8, GRID_OFFSET_Y = 8  (grid top-left in scene)
- *   CANVAS_W = 640, CANVAS_H = 576
+ *   CANVAS_W = 1040, CANVAS_H = 848
  *
  * Rendering layers (depth):
  *   0: tiles and gaze overlay, 2: items, 3: statues, 4: enemies, 5: player/companion
@@ -31,14 +32,19 @@ import { HtmlBridge } from '../ui/HtmlBridge'
 import type { StatueState } from '../types/state'
 import type { EnemyDefinition } from '../types/entity'
 
-const TILE_SIZE = 48
+const TILE_SIZE = 64
 const GRID_OFFSET_X = 8
 const GRID_OFFSET_Y = 8
 
 export class GameScene extends Phaser.Scene {
   private state!: GameState
   private currentLevelIndex: number = 0
-  private pushPending: boolean = false
+
+  // Interaction menu state
+  private menuOptions: string[] = []
+  private menuActions: string[] = []  // parallel to menuOptions: 'inspect'|'push'|'use-oil'|'cancel'
+  private menuSelectedIndex: number = 0
+  private menuTargetStatueId: string | null = null
 
   // Persistent graphics object for tiles, gaze, and entity sprites
   private graphics!: Phaser.GameObjects.Graphics
@@ -79,16 +85,40 @@ export class GameScene extends Phaser.Scene {
     const wireBtn = (id: string, fn: () => void) => {
       document.getElementById(id)?.addEventListener('click', fn)
     }
-    wireBtn('btn-n', () => this.handleMove(0, -1))
-    wireBtn('btn-s', () => this.handleMove(0, 1))
+    wireBtn('btn-n', () => {
+      if (this.state.phase === 'menu') {
+        this.menuSelectedIndex = (this.menuSelectedIndex - 1 + this.menuOptions.length) % this.menuOptions.length
+        this.bridge.updateMenuSelection(this.menuSelectedIndex)
+      } else {
+        this.handleMove(0, -1)
+      }
+    })
+    wireBtn('btn-s', () => {
+      if (this.state.phase === 'menu') {
+        this.menuSelectedIndex = (this.menuSelectedIndex + 1) % this.menuOptions.length
+        this.bridge.updateMenuSelection(this.menuSelectedIndex)
+      } else {
+        this.handleMove(0, 1)
+      }
+    })
     wireBtn('btn-w', () => this.handleMove(-1, 0))
     wireBtn('btn-e', () => this.handleMove(1, 0))
-    wireBtn('btn-inspect', () => this.handleInspect())
-    wireBtn('btn-push', () => {
-      this.pushPending = true
-      this.bridge.pushMessage('Push where?', 'normal')
+    wireBtn('btn-inspect', () => this.handleInspectShortcut())
+    wireBtn('btn-use', () => this.handleUseOilShortcut())
+    wireBtn('btn-confirm', () => {
+      if (this.state.phase === 'playing') this.handleConfirm()
+      else if (this.state.phase === 'menu') this.executeMenuAction()
     })
-    wireBtn('btn-use', () => this.handleUse())
+    wireBtn('btn-cancel', () => {
+      if (this.state.phase === 'menu') {
+        this.closeMenu()
+      } else if (this.state.phase === 'inspecting') {
+        this.state.phase = 'playing'
+        this.state.inspectingStatue = undefined
+        this.bridge.hideStatuePanel()
+        this.render()
+      }
+    })
 
     // Initial message
     this.bridge.pushMessage('You enter the labyrinth. Move carefully.')
@@ -110,23 +140,25 @@ export class GameScene extends Phaser.Scene {
       return
     }
 
-    // When push-pending: arrow keys execute push, anything else cancels
-    if (this.pushPending) {
-      let dx = 0
-      let dy = 0
+    // When in menu phase: navigate and confirm
+    if (phase === 'menu') {
       switch (event.key) {
-        case 'ArrowUp':    case 'w': case 'W': dy = -1; break
-        case 'ArrowDown':  case 's': case 'S': dy = 1;  break
-        case 'ArrowLeft':  case 'a': case 'A': dx = -1; break
-        case 'ArrowRight': case 'd': case 'D': dx = 1;  break
-        default:
-          this.pushPending = false
-          this.bridge.pushMessage('Push cancelled.')
-          this.render()
-          return
+        case 'ArrowUp': case 'w': case 'W':
+          this.menuSelectedIndex = (this.menuSelectedIndex - 1 + this.menuOptions.length) % this.menuOptions.length
+          this.bridge.updateMenuSelection(this.menuSelectedIndex)
+          break
+        case 'ArrowDown': case 's': case 'S':
+          this.menuSelectedIndex = (this.menuSelectedIndex + 1) % this.menuOptions.length
+          this.bridge.updateMenuSelection(this.menuSelectedIndex)
+          break
+        case 'Enter': case ' ': case 'z': case 'Z':
+          this.executeMenuAction()
+          break
+        case 'Escape': case 'x': case 'X': case 'Backspace':
+          this.closeMenu()
+          break
+        // ArrowLeft/Right/A/D: no-op (don't accidentally move while in menu)
       }
-      this.pushPending = false
-      this.handlePush(dx, dy)
       return
     }
 
@@ -146,13 +178,9 @@ export class GameScene extends Phaser.Scene {
       case 'ArrowDown':  case 's': case 'S': this.handleMove(0, 1);   break
       case 'ArrowLeft':  case 'a': case 'A': this.handleMove(-1, 0);  break
       case 'ArrowRight': case 'd': case 'D': this.handleMove(1, 0);   break
-      case 'i': case 'I': this.handleInspect(); break
-      case 'p': case 'P':
-        this.pushPending = true
-        this.bridge.pushMessage('Push where? (arrow key / WASD)')
-        this.render()
-        break
-      case 'u': case 'U': this.handleUse(); break
+      case 'Enter': case ' ': case 'z': case 'Z': this.handleConfirm(); break
+      case 'i': case 'I': this.handleInspectShortcut(); break
+      case 'u': case 'U': this.handleUseOilShortcut(); break
     }
   }
 
@@ -178,15 +206,20 @@ export class GameScene extends Phaser.Scene {
     const dist = Math.abs(tx - playerPos.x) + Math.abs(ty - playerPos.y)
 
     if (dist === 1) {
-      // Check if there's a statue at the clicked tile — if so, inspect
+      const dx = tx - playerPos.x
+      const dy = ty - playerPos.y
+      // Update facing to clicked direction
+      const facing = dx === 1 ? 'E' : dx === -1 ? 'W' : dy === -1 ? 'N' : 'S'
+      this.state.playerFacing = facing as import('../types/gaze').CardinalDirection
+
+      // Check if the clicked tile is the currently faced tile with a statue
       const statueAtTile = this.state.statueStates.find(
         s => !s.isRestored && s.pos.x === tx && s.pos.y === ty
       )
       if (statueAtTile) {
-        this.handleInspect()
+        // Open interaction menu
+        this.handleConfirm()
       } else {
-        const dx = tx - playerPos.x
-        const dy = ty - playerPos.y
         this.handleMove(dx, dy)
       }
     }
@@ -213,6 +246,85 @@ export class GameScene extends Phaser.Scene {
       this.bridge.pushMessage('You enter the labyrinth. Move carefully.')
       this.render()
     }
+  }
+
+  // ─── Interaction Menu ──────────────────────────────────────────────────────
+
+  private handleConfirm(): void {
+    if (this.state.phase !== 'playing') return
+    const { playerPos, playerFacing, statueStates, inventory } = this.state
+    const facingVec = { N:{x:0,y:-1}, S:{x:0,y:1}, E:{x:1,y:0}, W:{x:-1,y:0} }[playerFacing]
+    const tx = playerPos.x + facingVec.x
+    const ty = playerPos.y + facingVec.y
+
+    // Find statue at faced tile
+    const statue = statueStates.find(s => !s.isRestored && s.pos.x === tx && s.pos.y === ty)
+    if (!statue) return
+
+    // Handle trap
+    if (statue.def.isTrap) {
+      const dmg = (statue.def.trapGazeRange ?? 1) * 5
+      this.state.petrification = Math.min(100, this.state.petrification + dmg)
+      this.bridge.pushMessage(`It's a trap! (${dmg} petrification)`, 'danger')
+      this.advanceTurn('')
+      return
+    }
+
+    // Build menu options
+    this.menuOptions = []
+    this.menuActions = []
+    this.menuOptions.push('Inspect')
+    this.menuActions.push('inspect')
+    if (statue.def.isPushable) {
+      this.menuOptions.push('Push')
+      this.menuActions.push('push')
+    }
+    if (statue.def.restorationCondition && !statue.isRestored && inventory.includes('softening-oil')) {
+      this.menuOptions.push('Use Softening Oil')
+      this.menuActions.push('use-oil')
+    }
+    this.menuOptions.push('Cancel')
+    this.menuActions.push('cancel')
+
+    this.menuSelectedIndex = 0
+    this.menuTargetStatueId = statue.def.id
+    this.state.phase = 'menu'
+    this.bridge.showMenu(statue.def.name, this.menuOptions, this.menuSelectedIndex)
+    this.render()
+  }
+
+  private executeMenuAction(): void {
+    const action = this.menuActions[this.menuSelectedIndex]
+    const statue = this.state.statueStates.find(s => s.def.id === this.menuTargetStatueId)
+    this.closeMenu()
+    if (!statue) return
+
+    if (action === 'inspect') {
+      // Show inspect panel (costs 1 turn)
+      statue.unlockedStageIndex = Math.min(
+        statue.unlockedStageIndex,
+        statue.def.memoryStages.length - 1
+      )
+      this.state.phase = 'inspecting'
+      this.state.inspectingStatue = statue
+      this.bridge.showStatuePanel(statue)
+      this.advanceTurn(`You inspect ${statue.def.name}.`)
+    } else if (action === 'push') {
+      // Push in player's facing direction (costs 1 turn)
+      const { playerFacing } = this.state
+      const dv = { N:{x:0,y:-1}, S:{x:0,y:1}, E:{x:1,y:0}, W:{x:-1,y:0} }[playerFacing]
+      this.handlePushStatue(statue, dv.x, dv.y)
+    } else if (action === 'use-oil') {
+      this.handleUseOil(statue)
+    }
+    // 'cancel' just closes menu (already done)
+  }
+
+  private closeMenu(): void {
+    this.state.phase = 'playing'
+    this.menuTargetStatueId = null
+    this.bridge.hideMenu()
+    this.render()
   }
 
   // ─── Actions ───────────────────────────────────────────────────────────────
@@ -262,33 +374,32 @@ export class GameScene extends Phaser.Scene {
     this.advanceTurn('You move.')
   }
 
-  private handleInspect(): void {
-    const { playerPos, statueStates } = this.state
-    // Find statue adjacent (Manhattan dist 1)
-    const adjacent = statueStates.find(
-      s => !s.isRestored &&
-        Math.abs(s.pos.x - playerPos.x) + Math.abs(s.pos.y - playerPos.y) === 1
-    )
+  // Shortcut: directly inspect the faced statue (no menu)
+  private handleInspectShortcut(): void {
+    if (this.state.phase !== 'playing') return
+    const { playerPos, playerFacing, statueStates } = this.state
+    const facingVec = { N:{x:0,y:-1}, S:{x:0,y:1}, E:{x:1,y:0}, W:{x:-1,y:0} }[playerFacing]
+    const tx = playerPos.x + facingVec.x
+    const ty = playerPos.y + facingVec.y
 
-    if (!adjacent) {
+    const statue = statueStates.find(s => !s.isRestored && s.pos.x === tx && s.pos.y === ty)
+
+    if (!statue) {
       this.bridge.pushMessage('Nothing to inspect nearby.')
       this.render()
       return
     }
 
-    if (adjacent.def.isTrap) {
-      // Trigger trap
-      const trapDamage = (adjacent.def.trapGazeRange ?? 1) * 5
+    if (statue.def.isTrap) {
+      const trapDamage = (statue.def.trapGazeRange ?? 1) * 5
       this.state.petrification = Math.min(100, this.state.petrification + trapDamage)
       this.bridge.pushMessage(`It was a trap! You reel back. (+${trapDamage}% petrification)`, 'danger')
-      this.advanceTurn(`You approach ${adjacent.def.name}...`)
+      this.advanceTurn(`You approach ${statue.def.name}...`)
       return
     }
 
-    // Normal statue inspect — costs a turn, then opens panel
-    this.advanceTurn(`You inspect ${adjacent.def.name}.`)
-    // After advanceTurn the statue reference is still valid
-    const statueState = this.state.statueStates.find(s => s.def.id === adjacent.def.id)
+    this.advanceTurn(`You inspect ${statue.def.name}.`)
+    const statueState = this.state.statueStates.find(s => s.def.id === statue.def.id)
     if (statueState) {
       this.state.phase = 'inspecting'
       this.state.inspectingStatue = statueState
@@ -297,20 +408,44 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private handlePush(dx: number, dy: number): void {
-    const { playerPos, statueStates, levelDef } = this.state
-    const targetX = playerPos.x + dx
-    const targetY = playerPos.y + dy
+  // Shortcut: directly use oil on faced statue (no menu)
+  private handleUseOilShortcut(): void {
+    if (this.state.phase !== 'playing') return
+    const { inventory, playerPos, playerFacing, statueStates } = this.state
 
-    const statue = statueStates.find(
-      s => !s.isRestored && s.pos.x === targetX && s.pos.y === targetY
-    )
-
-    if (!statue) {
-      this.bridge.pushMessage('Nothing to push there.')
+    if (!inventory.includes('softening-oil')) {
+      this.bridge.pushMessage('You have no Softening Oil.')
       this.render()
       return
     }
+
+    const facingVec = { N:{x:0,y:-1}, S:{x:0,y:1}, E:{x:1,y:0}, W:{x:-1,y:0} }[playerFacing]
+    const tx = playerPos.x + facingVec.x
+    const ty = playerPos.y + facingVec.y
+
+    const statue = statueStates.find(
+      s => !s.isRestored &&
+        s.def.restorationCondition !== undefined &&
+        s.pos.x === tx && s.pos.y === ty
+    )
+
+    if (statue) {
+      this.handleUseOil(statue)
+    } else {
+      // Use on self — reduce petrification
+      const itemIndex = inventory.indexOf('softening-oil')
+      inventory.splice(itemIndex, 1)
+      const reduction = softeningOilEffect()
+      this.state.petrification = Math.max(0, this.state.petrification - reduction)
+      this.bridge.pushMessage(`You apply Softening Oil. The stiffness recedes. (-${reduction}% petrification)`, 'good')
+      this.advanceTurn('You apply Softening Oil.')
+    }
+  }
+
+  private handlePushStatue(statue: StatueState, dx: number, dy: number): void {
+    const { levelDef, statueStates } = this.state
+    const targetX = statue.pos.x
+    const targetY = statue.pos.y
 
     if (!statue.def.isPushable) {
       this.bridge.pushMessage(`${statue.def.name} won't budge.`)
@@ -350,73 +485,48 @@ export class GameScene extends Phaser.Scene {
     this.advanceTurn(`You push ${statue.def.name}.`)
   }
 
-  private handleUse(): void {
-    const { inventory, playerPos, statueStates, phase } = this.state
-
-    if (phase !== 'playing') return
-
-    if (inventory.length === 0) {
-      this.bridge.pushMessage('Your inventory is empty.')
-      this.render()
-      return
-    }
-
+  private handleUseOil(statue: StatueState): void {
+    const { inventory, playerPos } = this.state
     const itemIndex = inventory.indexOf('softening-oil')
     if (itemIndex === -1) {
-      this.bridge.pushMessage('Nothing usable in inventory.')
+      this.bridge.pushMessage('You have no Softening Oil.')
       this.render()
       return
     }
 
-    // Check for adjacent non-restored statue with restoration condition
-    const adjacentStatue = statueStates.find(
-      s => !s.isRestored &&
-        s.def.restorationCondition !== undefined &&
-        Math.abs(s.pos.x - playerPos.x) + Math.abs(s.pos.y - playerPos.y) === 1
+    // Use oil on statue — restore her
+    inventory.splice(itemIndex, 1)
+    statue.isRestored = true
+
+    // Unlock restored memory stage
+    const restoredStageIndex = statue.def.memoryStages.findIndex(
+      ms => ms.unlockCondition.type === 'restored'
     )
+    if (restoredStageIndex !== -1) {
+      statue.unlockedStageIndex = restoredStageIndex
+    }
 
-    if (adjacentStatue) {
-      // Use oil on statue — restore her
-      inventory.splice(itemIndex, 1)
-      adjacentStatue.isRestored = true
+    // Apply restoration effect
+    const effect = statue.def.restorationEffect
+    if (effect) {
+      this.applyRestorationEffect(effect, statue)
+    }
 
-      // Unlock restored memory stage
-      const restoredStageIndex = adjacentStatue.def.memoryStages.findIndex(
-        ms => ms.unlockCondition.type === 'restored'
-      )
-      if (restoredStageIndex !== -1) {
-        adjacentStatue.unlockedStageIndex = restoredStageIndex
-      }
+    // Set companion
+    this.state.companion = { sourceStatueId: statue.def.id, pos: { ...playerPos } }
 
-      // Apply restoration effect
-      const effect = adjacentStatue.def.restorationEffect
-      if (effect) {
-        this.applyRestorationEffect(effect, adjacentStatue)
-      }
+    this.bridge.pushMessage(`${statue.def.name} is restored. She follows you.`, 'good')
 
-      // Set companion
-      this.state.companion = { sourceStatueId: adjacentStatue.def.id, pos: { ...playerPos } }
+    // Show stage 1 memory panel
+    this.advanceTurn(`You pour Softening Oil on ${statue.def.name}. She stirs.`)
 
-      this.bridge.pushMessage(`${adjacentStatue.def.name} is restored. She follows you.`, 'good')
-
-      // Show stage 1 memory panel
-      this.advanceTurn(`You pour Softening Oil on ${adjacentStatue.def.name}. She stirs.`)
-
-      // Open inspect panel to show restored stage
-      const statueState = this.state.statueStates.find(s => s.def.id === adjacentStatue.def.id)
-      if (statueState) {
-        this.state.phase = 'inspecting'
-        this.state.inspectingStatue = statueState
-        this.bridge.showStatuePanel(statueState)
-        this.render()
-      }
-    } else {
-      // Use on self — reduce petrification
-      inventory.splice(itemIndex, 1)
-      const reduction = softeningOilEffect()
-      this.state.petrification = Math.max(0, this.state.petrification - reduction)
-      this.bridge.pushMessage(`You apply Softening Oil. The stiffness recedes. (-${reduction}% petrification)`, 'good')
-      this.advanceTurn('You apply Softening Oil.')
+    // Open inspect panel to show restored stage
+    const statueState = this.state.statueStates.find(s => s.def.id === statue.def.id)
+    if (statueState) {
+      this.state.phase = 'inspecting'
+      this.state.inspectingStatue = statueState
+      this.bridge.showStatuePanel(statueState)
+      this.render()
     }
   }
 
@@ -465,8 +575,10 @@ export class GameScene extends Phaser.Scene {
   private advanceTurn(actionMessage: string): void {
     const s = this.state
 
-    this.bridge.pushMessage(actionMessage)
-    s.messages.unshift(actionMessage)
+    if (actionMessage) {
+      this.bridge.pushMessage(actionMessage)
+      s.messages.unshift(actionMessage)
+    }
 
     // Save prev player pos for companion
     const prevPlayerPos = { ...s.playerPos }
@@ -689,43 +801,45 @@ export class GameScene extends Phaser.Scene {
     const g = this.graphics
     const { statueStates, enemyStates, itemStates, playerPos, companion } = this.state
 
-    // Items (depth 2) — small oil bottle silhouette
+    // Items (depth 2) — oil bottle at 64px tile
     for (const item of itemStates) {
       if (item.consumed) continue
       const { px, py } = this.tileToPixel(item.pos.x, item.pos.y)
-      const cx = px + TILE_SIZE / 2
-      const cy = py + TILE_SIZE / 2
-      // Bottle body (yellow-brown rectangle)
-      g.fillStyle(0xccaa44)
-      g.fillRect(cx - 6, cy - 4, 12, 10)
-      // Bottle neck (small circle top)
-      g.fillStyle(0xaa8833)
-      g.fillRect(cx - 3, cy - 8, 6, 4)
-      g.fillCircle(cx, cy - 8, 3)
+      const cx = px + 32
+      const cy = py + 32
+      // Bottle body
+      g.fillStyle(0x997733)
+      g.fillRect(cx - 5, cy - 4, 10, 14)
+      // Bottle cap
+      g.fillStyle(0x664422)
+      g.fillRect(cx - 3, cy - 8, 6, 5)
+      // Shine
+      g.fillStyle(0xddbb55, 0.6)
+      g.fillRect(cx - 2, cy - 3, 3, 7)
     }
 
-    // Statues (depth 3) — marble silhouette
+    // Statues (depth 3) — marble silhouette at 64px tile
     for (const statue of statueStates) {
       if (statue.isRestored) continue
       const { px, py } = this.tileToPixel(statue.pos.x, statue.pos.y)
-      const cx = px + TILE_SIZE / 2
-      const cy = py + TILE_SIZE / 2
+      const cx = px + 32
+      const cy = py + 32
 
-      // Body: light grey fill with darker outline
+      // Body
       g.fillStyle(0xccccdd)
-      g.fillRect(cx - 12, cy - 8, 24, 24)
-      // Rounded head blob
-      g.fillCircle(cx, cy - 14, 10)
+      g.fillRect(cx - 14, cy - 26, 28, 50)
       // Outline
-      g.lineStyle(1, 0xaaaacc)
-      g.strokeRect(cx - 12, cy - 8, 24, 24)
-      g.strokeCircle(cx, cy - 14, 10)
+      g.lineStyle(2, 0xaaaacc)
+      g.strokeRect(cx - 14, cy - 26, 28, 50)
+      // Head blob (slightly above body)
+      g.fillStyle(0xccccdd)
+      g.fillCircle(cx, cy - 28, 10)
 
       // Name initial label
       const initial = this.add.text(
-        cx, cy + 6,
+        cx, cy,
         statue.def.name[0],
-        { fontSize: '10px', color: '#555577', fontStyle: 'bold' }
+        { fontSize: '11px', color: '#555577', fontStyle: 'bold' }
       ).setOrigin(0.5, 0.5).setDepth(3)
       this.entityObjects.push(initial)
     }
@@ -733,38 +847,39 @@ export class GameScene extends Phaser.Scene {
     // Enemies (depth 4)
     for (const enemy of enemyStates) {
       const { px, py } = this.tileToPixel(enemy.pos.x, enemy.pos.y)
-      const cx = px + TILE_SIZE / 2
-      const cy = py + TILE_SIZE / 2
+      const cx = px + 32
+      const cy = py + 32
 
       if (enemy.def.type === 'sentinel') {
         // Sentinel: dark blue body
         g.fillStyle(0x334466)
         g.fillRect(cx - 14, cy - 14, 28, 28)
-        // Rotating eye indicator (direction dot)
-        const facingOffsets: Record<string, [number, number]> = {
-          N: [0, -10], E: [10, 0], S: [0, 10], W: [-10, 0]
-        }
-        const [fox, foy] = facingOffsets[enemy.facing] ?? [0, 0]
-        g.fillStyle(0xaabbff)
-        g.fillCircle(cx + fox, cy + foy, 4)
+        // Centre eye
+        g.fillStyle(0x88aaff)
+        g.fillCircle(cx, cy, 6)
+        // Facing arrow (8px triangles, white)
+        g.fillStyle(0xffffff)
+        const f = enemy.facing
+        if (f === 'N') { g.fillTriangle(cx, cy - 16, cx - 5, cy - 8, cx + 5, cy - 8) }
+        else if (f === 'S') { g.fillTriangle(cx, cy + 16, cx - 5, cy + 8, cx + 5, cy + 8) }
+        else if (f === 'E') { g.fillTriangle(cx + 16, cy, cx + 8, cy - 5, cx + 8, cy + 5) }
+        else               { g.fillTriangle(cx - 16, cy, cx - 8, cy - 5, cx - 8, cy + 5) }
         g.lineStyle(1, 0x6677aa)
         g.strokeRect(cx - 14, cy - 14, 28, 28)
       } else {
-        // Gorgon: dark red body
+        // Gorgon: dark red body circle
         g.fillStyle(0xaa2222)
-        g.fillRect(cx - 14, cy - 14, 28, 28)
-        // Yellow eyes (2px dots)
+        g.fillCircle(cx, cy, 18)
+        // Yellow eyes
         g.fillStyle(0xffff00)
-        g.fillRect(cx - 6, cy - 4, 3, 3)
-        g.fillRect(cx + 3, cy - 4, 3, 3)
-        // Snake protrusions (4 short lines from top)
-        g.lineStyle(1, 0x88ff44)
-        g.lineBetween(cx - 6, cy - 14, cx - 8, cy - 20)
-        g.lineBetween(cx - 2, cy - 14, cx - 2, cy - 21)
-        g.lineBetween(cx + 2, cy - 14, cx + 2, cy - 21)
-        g.lineBetween(cx + 6, cy - 14, cx + 8, cy - 20)
-        g.lineStyle(1, 0x882222)
-        g.strokeRect(cx - 14, cy - 14, 28, 28)
+        g.fillCircle(cx - 6, cy - 4, 3)
+        g.fillCircle(cx + 6, cy - 4, 3)
+        // Snake protrusions (4 short 3×10 rects around top of circle)
+        g.fillStyle(0x88ff44)
+        g.fillRect(cx - 10, cy - 26, 3, 10)
+        g.fillRect(cx - 4, cy - 28, 3, 10)
+        g.fillRect(cx + 2, cy - 28, 3, 10)
+        g.fillRect(cx + 7, cy - 26, 3, 10)
       }
 
       // Type initial label
@@ -778,7 +893,7 @@ export class GameScene extends Phaser.Scene {
       const label = this.add.text(
         cx, cy + 2,
         typeInitial[enemy.def.type] ?? '?',
-        { fontSize: '10px', color: '#ffaaaa', fontStyle: 'bold' }
+        { fontSize: '11px', color: '#ffaaaa', fontStyle: 'bold' }
       ).setOrigin(0.5, 0.5).setDepth(4)
       this.entityObjects.push(label)
     }
@@ -786,31 +901,29 @@ export class GameScene extends Phaser.Scene {
     // Companion (depth 5, drawn before player so player is on top)
     if (companion !== null) {
       const { px, py } = this.tileToPixel(companion.pos.x, companion.pos.y)
-      const cx = px + TILE_SIZE / 2
-      const cy = py + TILE_SIZE / 2
+      const cx = px + 32
+      const cy = py + 32
 
-      // Same as player but slightly smaller and with blue tint overlay
-      // Hair (small rect top)
+      // Hair
       g.fillStyle(0x3a1f1f)
-      g.fillRect(cx - 8, cy - 19, 16, 6)
-      // Head (skin tone)
-      g.fillCircle(cx, cy - 14, 7)
+      g.fillRect(cx - 12, cy - 26, 24, 10)
+      // Head
       g.fillStyle(0xc8956c)
-      g.fillCircle(cx, cy - 14, 7)
+      g.fillCircle(cx, cy - 18, 11)
       // Body
       g.fillStyle(0x555588)
-      g.fillRect(cx - 7, cy - 7, 14, 14)
+      g.fillRect(cx - 11, cy - 7, 22, 20)
       // Legs
       g.fillStyle(0x5555aa)
-      g.fillRect(cx - 7, cy + 7, 6, 7)
-      g.fillRect(cx + 1, cy + 7, 6, 7)
+      g.fillRect(cx - 11, cy + 13, 10, 11)
+      g.fillRect(cx + 1, cy + 13, 10, 11)
       // Feet
       g.fillStyle(0x3333aa)
-      g.fillRect(cx - 8, cy + 13, 6, 2)
-      g.fillRect(cx + 2, cy + 13, 6, 2)
+      g.fillRect(cx - 12, cy + 24, 10, 3)
+      g.fillRect(cx + 2, cy + 24, 10, 3)
       // Blue tint overlay
       g.fillStyle(0x8888ff, 0.3)
-      g.fillRect(cx - 8, cy - 19, 16, 34)
+      g.fillRect(cx - 11, cy - 26, 22, 47)
     }
 
     // Facing indicator — highlight the tile the player is looking at
@@ -821,41 +934,41 @@ export class GameScene extends Phaser.Scene {
       if (fx >= 0 && fy >= 0 && fx < this.state.levelDef.width && fy < this.state.levelDef.height) {
         const { px, py } = this.tileToPixel(fx, fy)
         g.lineStyle(2, 0xffffff, 0.5)
-        g.strokeRect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4)
+        g.strokeRect(px + 3, py + 3, TILE_SIZE - 6, TILE_SIZE - 6)
       }
     }
 
     // Player (depth 5)
     {
       const { px, py } = this.tileToPixel(playerPos.x, playerPos.y)
-      const cx = px + TILE_SIZE / 2
-      const cy = py + TILE_SIZE / 2
+      const cx = px + 32
+      const cy = py + 32
 
-      // Hair (small rect top, white/light)
+      // Hair
       g.fillStyle(0xe8d8a0)
-      g.fillRect(cx - 9, cy - 20, 18, 7)
-      // Head (skin tone circle)
+      g.fillRect(cx - 12, cy - 26, 24, 10)
+      // Head
       g.fillStyle(0xc8956c)
-      g.fillCircle(cx, cy - 14, 8)
-      // Body (dark rectangle)
+      g.fillCircle(cx, cy - 18, 11)
+      // Body
       g.fillStyle(0x444444)
-      g.fillRect(cx - 8, cy - 6, 16, 16)
-      // Legs (#666)
+      g.fillRect(cx - 11, cy - 7, 22, 20)
+      // Legs
       g.fillStyle(0x666666)
-      g.fillRect(cx - 8, cy + 10, 7, 8)
-      g.fillRect(cx + 1, cy + 10, 7, 8)
-      // Feet (#333)
+      g.fillRect(cx - 11, cy + 13, 10, 11)
+      g.fillRect(cx + 1, cy + 13, 10, 11)
+      // Feet
       g.fillStyle(0x333333)
-      g.fillRect(cx - 9, cy + 17, 7, 2)
-      g.fillRect(cx + 2, cy + 17, 7, 2)
+      g.fillRect(cx - 12, cy + 24, 10, 3)
+      g.fillRect(cx + 2, cy + 24, 10, 3)
 
-      // Facing arrow (small triangle toward faced tile)
+      // Facing arrow
       g.fillStyle(0xffffff, 0.8)
       const f = this.state.playerFacing
-      if (f === 'N') { g.fillTriangle(cx, cy - 22, cx - 4, cy - 16, cx + 4, cy - 16) }
-      else if (f === 'S') { g.fillTriangle(cx, cy + 20, cx - 4, cy + 14, cx + 4, cy + 14) }
-      else if (f === 'E') { g.fillTriangle(cx + 12, cy, cx + 6, cy - 4, cx + 6, cy + 4) }
-      else              { g.fillTriangle(cx - 12, cy, cx - 6, cy - 4, cx - 6, cy + 4) }
+      if (f === 'N') { g.fillTriangle(cx, cy - 28, cx - 5, cy - 20, cx + 5, cy - 20) }
+      else if (f === 'S') { g.fillTriangle(cx, cy + 26, cx - 5, cy + 18, cx + 5, cy + 18) }
+      else if (f === 'E') { g.fillTriangle(cx + 16, cy, cx + 8, cy - 5, cx + 8, cy + 5) }
+      else               { g.fillTriangle(cx - 16, cy, cx - 8, cy - 5, cx - 8, cy + 5) }
     }
   }
 
@@ -877,7 +990,7 @@ export class GameScene extends Phaser.Scene {
     const gridW = GRID_OFFSET_X + this.state.levelDef.width * TILE_SIZE + GRID_OFFSET_X
     const g = this.graphics
     g.fillStyle(0x000000, 0.65)
-    g.fillRect(0, 0, gridW, 576)
+    g.fillRect(0, 0, gridW, 848)
 
     const cx = gridW / 2
     const headlineText = this.add.text(cx, 260, headline, {
