@@ -3,55 +3,51 @@
  *
  * Responsibilities:
  *   - Owns GameState (single source of truth)
- *   - Renders tile grid, player, statues, enemies, gaze overlay, UI panel
+ *   - Renders tile grid, player, statues, enemies, gaze overlay via Phaser Graphics
+ *   - All UI (stats, messages, statue inspect panel) delegated to HtmlBridge
  *   - Handles keyboard input: arrows/WASD (move), I (inspect), P (push), U (use item)
- *   - Advances turns: action → gaze collision check → petrification update → re-render
+ *   - Handles pointer-down click-to-move on canvas
+ *   - Handles mobile control button wiring (btn-n/s/e/w, btn-inspect, btn-push, btn-use)
+ *   - Advances turns: action → companion move → gaze collision → petrification → re-render
  *   - Detects win (exit tile) and lose (petrification ≥ 100) conditions
  *   - Recomputes gaze each turn via computeGaze()
  *   - Advances to next level on win; shows game-over overlay on lose
+ *   - Companion logic: follows player; re-petrifies if caught in gaze (+40 petrification)
  *
  * Constants (pixels):
  *   TILE_SIZE = 48
  *   GRID_OFFSET_X = 8, GRID_OFFSET_Y = 8  (grid top-left in scene)
- *   UI_X = 640  (right panel start x)
- *   CANVAS_W = 1024, CANVAS_H = 640
+ *   CANVAS_W = 640, CANVAS_H = 576
  *
  * Rendering layers (depth):
- *   0: tiles, 1: gaze overlay, 2: items, 3: statues, 4: enemies, 5: player, 100: StatuePanel
+ *   0: tiles and gaze overlay, 2: items, 3: statues, 4: enemies, 5: player/companion
  */
 import Phaser from 'phaser'
 import { LEVELS } from '../levels'
 import { initGameState, type GameState } from '../systems/levelLoader'
 import { computeGaze, rotateClockwise } from '../systems/gaze'
-import { actionCost, gazeCost, thresholdLabel, softeningOilEffect } from '../systems/petrification'
-import { MessageLog } from '../ui/MessageLog'
-import { StatuePanel } from '../ui/StatuePanel'
+import { actionCost, gazeCost, softeningOilEffect } from '../systems/petrification'
+import { HtmlBridge } from '../ui/HtmlBridge'
 import type { StatueState } from '../types/state'
 import type { EnemyDefinition } from '../types/entity'
 
 const TILE_SIZE = 48
 const GRID_OFFSET_X = 8
 const GRID_OFFSET_Y = 8
-const UI_X = 648
 
 export class GameScene extends Phaser.Scene {
   private state!: GameState
   private currentLevelIndex: number = 0
   private pushPending: boolean = false
 
-  // Persistent graphics objects
+  // Persistent graphics object for tiles, gaze, and entity sprites
   private graphics!: Phaser.GameObjects.Graphics
-  private uiGraphics!: Phaser.GameObjects.Graphics
 
   // Entity layer — destroyed and recreated each render
   private entityObjects: Phaser.GameObjects.GameObject[] = []
 
-  // UI text objects — destroyed and recreated each render
-  private uiTexts: Phaser.GameObjects.GameObject[] = []
-
-  // UI components
-  private messageLog!: MessageLog
-  private statuePanel!: StatuePanel
+  // HTML bridge for all DOM-side UI
+  private bridge!: HtmlBridge
 
   constructor() {
     super({ key: 'GameScene' })
@@ -62,20 +58,40 @@ export class GameScene extends Phaser.Scene {
     this.state = initGameState(LEVELS[0], 0)
     this.recomputeGaze()
 
-    // Persistent drawing surfaces
+    // Persistent drawing surface
     this.graphics = this.add.graphics()
     this.graphics.setDepth(0)
-    this.uiGraphics = this.add.graphics()
-    this.uiGraphics.setDepth(0)
 
-    // UI components
-    this.messageLog = new MessageLog(this, UI_X + 8, 440, 360)
-    this.statuePanel = new StatuePanel(this)
+    // HTML bridge — initialise after DOM is ready (Phaser create runs after DOMContentLoaded)
+    this.bridge = new HtmlBridge()
 
     // Keyboard input
     this.input.keyboard!.on('keydown', (event: KeyboardEvent) => {
       this.handleKeyDown(event)
     })
+
+    // Click-to-move on canvas
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      this.handlePointerDown(pointer)
+    })
+
+    // Mobile button wiring
+    const wireBtn = (id: string, fn: () => void) => {
+      document.getElementById(id)?.addEventListener('click', fn)
+    }
+    wireBtn('btn-n', () => this.handleMove(0, -1))
+    wireBtn('btn-s', () => this.handleMove(0, 1))
+    wireBtn('btn-w', () => this.handleMove(-1, 0))
+    wireBtn('btn-e', () => this.handleMove(1, 0))
+    wireBtn('btn-inspect', () => this.handleInspect())
+    wireBtn('btn-push', () => {
+      this.pushPending = true
+      this.bridge.pushMessage('Push where?', 'normal')
+    })
+    wireBtn('btn-use', () => this.handleUse())
+
+    // Initial message
+    this.bridge.pushMessage('You enter the labyrinth. Move carefully.')
 
     this.render()
   }
@@ -89,7 +105,7 @@ export class GameScene extends Phaser.Scene {
     if (phase === 'inspecting') {
       this.state.phase = 'playing'
       this.state.inspectingStatue = undefined
-      this.statuePanel.hide()
+      this.bridge.hideStatuePanel()
       this.render()
       return
     }
@@ -105,7 +121,7 @@ export class GameScene extends Phaser.Scene {
         case 'ArrowRight': case 'd': case 'D': dx = 1;  break
         default:
           this.pushPending = false
-          this.addMessage('Push cancelled.')
+          this.bridge.pushMessage('Push cancelled.')
           this.render()
           return
       }
@@ -133,10 +149,46 @@ export class GameScene extends Phaser.Scene {
       case 'i': case 'I': this.handleInspect(); break
       case 'p': case 'P':
         this.pushPending = true
-        this.addMessage('Push where? (arrow key / WASD)')
+        this.bridge.pushMessage('Push where? (arrow key / WASD)')
         this.render()
         break
       case 'u': case 'U': this.handleUse(); break
+    }
+  }
+
+  private handlePointerDown(pointer: Phaser.Input.Pointer): void {
+    const { phase } = this.state
+
+    // Close inspect panel on any click
+    if (phase === 'inspecting') {
+      this.state.phase = 'playing'
+      this.state.inspectingStatue = undefined
+      this.bridge.hideStatuePanel()
+      this.render()
+      return
+    }
+
+    if (phase !== 'playing') return
+
+    // Convert pixel to tile
+    const tx = Math.floor((pointer.x - GRID_OFFSET_X) / TILE_SIZE)
+    const ty = Math.floor((pointer.y - GRID_OFFSET_Y) / TILE_SIZE)
+
+    const { playerPos } = this.state
+    const dist = Math.abs(tx - playerPos.x) + Math.abs(ty - playerPos.y)
+
+    if (dist === 1) {
+      // Check if there's a statue at the clicked tile — if so, inspect
+      const statueAtTile = this.state.statueStates.find(
+        s => !s.isRestored && s.pos.x === tx && s.pos.y === ty
+      )
+      if (statueAtTile) {
+        this.handleInspect()
+      } else {
+        const dx = tx - playerPos.x
+        const dy = ty - playerPos.y
+        this.handleMove(dx, dy)
+      }
     }
   }
 
@@ -147,6 +199,7 @@ export class GameScene extends Phaser.Scene {
         this.currentLevelIndex = nextIndex
         this.state = initGameState(LEVELS[nextIndex], nextIndex)
         this.recomputeGaze()
+        this.bridge.pushMessage(`You enter ${LEVELS[nextIndex].name}.`)
         this.render()
       } else {
         // All levels complete — show end screen (handled in render via phase check)
@@ -157,6 +210,7 @@ export class GameScene extends Phaser.Scene {
       // Restart current level
       this.state = initGameState(LEVELS[this.currentLevelIndex], this.currentLevelIndex)
       this.recomputeGaze()
+      this.bridge.pushMessage('You enter the labyrinth. Move carefully.')
       this.render()
     }
   }
@@ -170,7 +224,7 @@ export class GameScene extends Phaser.Scene {
 
     // Bounds check
     if (newX < 0 || newY < 0 || newX >= levelDef.width || newY >= levelDef.height) {
-      this.addMessage('You cannot go that way.')
+      this.bridge.pushMessage('You cannot go that way.')
       this.render()
       return
     }
@@ -178,7 +232,7 @@ export class GameScene extends Phaser.Scene {
     // Tile check
     const tile = levelDef.tiles[newY]?.[newX]
     if (tile === 'wall') {
-      this.addMessage('A wall blocks your path.')
+      this.bridge.pushMessage('A wall blocks your path.')
       this.render()
       return
     }
@@ -188,7 +242,7 @@ export class GameScene extends Phaser.Scene {
       s => !s.isRestored && s.pos.x === newX && s.pos.y === newY
     )
     if (statueAtDest) {
-      this.addMessage(`${statueAtDest.def.name} blocks the way. Push with P.`)
+      this.bridge.pushMessage(`${statueAtDest.def.name} blocks the way. Push with P.`)
       this.render()
       return
     }
@@ -207,7 +261,7 @@ export class GameScene extends Phaser.Scene {
     )
 
     if (!adjacent) {
-      this.addMessage('Nothing to inspect nearby.')
+      this.bridge.pushMessage('Nothing to inspect nearby.')
       this.render()
       return
     }
@@ -216,19 +270,19 @@ export class GameScene extends Phaser.Scene {
       // Trigger trap
       const trapDamage = (adjacent.def.trapGazeRange ?? 1) * 5
       this.state.petrification = Math.min(100, this.state.petrification + trapDamage)
-      this.addMessage(`It was a trap! You reel back. (+${trapDamage}% petrification)`)
+      this.bridge.pushMessage(`It was a trap! You reel back. (+${trapDamage}% petrification)`, 'danger')
       this.advanceTurn(`You approach ${adjacent.def.name}...`)
       return
     }
 
     // Normal statue inspect — costs a turn, then opens panel
     this.advanceTurn(`You inspect ${adjacent.def.name}.`)
-    // After advanceTurn the statue reference is still valid (we just advanced state)
+    // After advanceTurn the statue reference is still valid
     const statueState = this.state.statueStates.find(s => s.def.id === adjacent.def.id)
     if (statueState) {
       this.state.phase = 'inspecting'
       this.state.inspectingStatue = statueState
-      this.statuePanel.show(statueState)
+      this.bridge.showStatuePanel(statueState)
       this.render()
     }
   }
@@ -243,13 +297,13 @@ export class GameScene extends Phaser.Scene {
     )
 
     if (!statue) {
-      this.addMessage('Nothing to push there.')
+      this.bridge.pushMessage('Nothing to push there.')
       this.render()
       return
     }
 
     if (!statue.def.isPushable) {
-      this.addMessage(`${statue.def.name} won't budge.`)
+      this.bridge.pushMessage(`${statue.def.name} won't budge.`)
       this.render()
       return
     }
@@ -259,14 +313,14 @@ export class GameScene extends Phaser.Scene {
 
     // Bounds check
     if (destX < 0 || destY < 0 || destX >= levelDef.width || destY >= levelDef.height) {
-      this.addMessage('No room to push her that way.')
+      this.bridge.pushMessage('No room to push her that way.')
       this.render()
       return
     }
 
     // Wall check
     if (levelDef.tiles[destY]?.[destX] === 'wall') {
-      this.addMessage('A wall blocks the push.')
+      this.bridge.pushMessage('A wall blocks the push.')
       this.render()
       return
     }
@@ -276,7 +330,7 @@ export class GameScene extends Phaser.Scene {
       s => !s.isRestored && s.pos.x === destX && s.pos.y === destY
     )
     if (otherStatue) {
-      this.addMessage('Another statue is in the way.')
+      this.bridge.pushMessage('Another statue is in the way.')
       this.render()
       return
     }
@@ -287,22 +341,24 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleUse(): void {
-    const { inventory, playerPos, statueStates } = this.state
+    const { inventory, playerPos, statueStates, phase } = this.state
+
+    if (phase !== 'playing') return
 
     if (inventory.length === 0) {
-      this.addMessage('Your inventory is empty.')
+      this.bridge.pushMessage('Your inventory is empty.')
       this.render()
       return
     }
 
     const itemIndex = inventory.indexOf('softening-oil')
     if (itemIndex === -1) {
-      this.addMessage('Nothing usable in inventory.')
+      this.bridge.pushMessage('Nothing usable in inventory.')
       this.render()
       return
     }
 
-    // Check for adjacent restorable statue
+    // Check for adjacent non-restored statue with restoration condition
     const adjacentStatue = statueStates.find(
       s => !s.isRestored &&
         s.def.restorationCondition !== undefined &&
@@ -313,6 +369,7 @@ export class GameScene extends Phaser.Scene {
       // Use oil on statue — restore her
       inventory.splice(itemIndex, 1)
       adjacentStatue.isRestored = true
+
       // Unlock restored memory stage
       const restoredStageIndex = adjacentStatue.def.memoryStages.findIndex(
         ms => ms.unlockCondition.type === 'restored'
@@ -320,18 +377,36 @@ export class GameScene extends Phaser.Scene {
       if (restoredStageIndex !== -1) {
         adjacentStatue.unlockedStageIndex = restoredStageIndex
       }
+
       // Apply restoration effect
       const effect = adjacentStatue.def.restorationEffect
       if (effect) {
         this.applyRestorationEffect(effect, adjacentStatue)
       }
+
+      // Set companion
+      this.state.companion = { sourceStatueId: adjacentStatue.def.id, pos: { ...playerPos } }
+
+      this.bridge.pushMessage(`${adjacentStatue.def.name} is restored. She follows you.`, 'good')
+
+      // Show stage 1 memory panel
       this.advanceTurn(`You pour Softening Oil on ${adjacentStatue.def.name}. She stirs.`)
+
+      // Open inspect panel to show restored stage
+      const statueState = this.state.statueStates.find(s => s.def.id === adjacentStatue.def.id)
+      if (statueState) {
+        this.state.phase = 'inspecting'
+        this.state.inspectingStatue = statueState
+        this.bridge.showStatuePanel(statueState)
+        this.render()
+      }
     } else {
       // Use on self — reduce petrification
       inventory.splice(itemIndex, 1)
       const reduction = softeningOilEffect()
       this.state.petrification = Math.max(0, this.state.petrification - reduction)
-      this.advanceTurn(`You apply Softening Oil. The stiffness recedes. (-${reduction}% petrification)`)
+      this.bridge.pushMessage(`You apply Softening Oil. The stiffness recedes. (-${reduction}% petrification)`, 'good')
+      this.advanceTurn('You apply Softening Oil.')
     }
   }
 
@@ -344,7 +419,7 @@ export class GameScene extends Phaser.Scene {
         const idx = this.state.enemyStates.findIndex(e => e.def.id === effect.enemyId)
         if (idx !== -1) {
           this.state.enemyStates.splice(idx, 1)
-          this.addMessage(`The gorgon stirs, then retreats into the dark.`)
+          this.bridge.pushMessage('The gorgon stirs, then retreats into the dark.', 'good')
         }
         break
       }
@@ -352,12 +427,12 @@ export class GameScene extends Phaser.Scene {
         for (const tile of effect.tiles) {
           this.state.levelDef.tiles[tile.y][tile.x] = 'floor'
         }
-        this.addMessage('A path opens.')
+        this.bridge.pushMessage('A path opens.')
         break
       }
       case 'grant-item': {
         this.state.inventory.push('softening-oil')
-        this.addMessage(`You receive ${effect.itemId}.`)
+        this.bridge.pushMessage(`You receive ${effect.itemId}.`)
         break
       }
       case 'spawn-enemy': {
@@ -367,7 +442,7 @@ export class GameScene extends Phaser.Scene {
           pos: { x: enemyDef.x, y: enemyDef.y },
           facing: enemyDef.gazePattern.facing,
         })
-        this.addMessage('Something awakens...')
+        this.bridge.pushMessage('Something awakens...', 'danger')
         break
       }
       case 'none':
@@ -380,7 +455,11 @@ export class GameScene extends Phaser.Scene {
   private advanceTurn(actionMessage: string): void {
     const s = this.state
 
-    this.addMessage(actionMessage)
+    this.bridge.pushMessage(actionMessage)
+    s.messages.unshift(actionMessage)
+
+    // Save prev player pos for companion
+    const prevPlayerPos = { ...s.playerPos }
 
     // Increment turns
     s.turns++
@@ -388,7 +467,7 @@ export class GameScene extends Phaser.Scene {
     // Check soft limit
     if (!s.softLimitReached && s.turns >= s.levelDef.softTurnLimit) {
       s.softLimitReached = true
-      this.addMessage('The labyrinth grows heavier. Each step costs more.')
+      this.bridge.pushMessage('The labyrinth grows heavier. Each step costs more.', 'danger')
     }
 
     // Apply action petrification cost
@@ -405,11 +484,40 @@ export class GameScene extends Phaser.Scene {
     // Recompute gaze
     this.recomputeGaze()
 
-    // Apply gaze petrification
+    // Move companion to player's previous pos
+    if (s.companion !== null) {
+      s.companion.pos = { ...prevPlayerPos }
+    }
+
+    // Apply gaze petrification to player
     const gazeDmg = gazeCost(s.activeGazeTiles, s.playerPos)
     if (gazeDmg > 0) {
       s.petrification = Math.min(100, s.petrification + gazeDmg)
-      this.addMessage(`You are caught in a gaze! (+${gazeDmg}% petrification)`)
+      this.bridge.pushMessage(`You are caught in a gaze! (+${gazeDmg}% petrification)`, 'danger')
+      s.messages.unshift(`You are caught in a gaze! (+${gazeDmg}% petrification)`)
+    }
+
+    // Check companion gaze collision
+    if (s.companion !== null) {
+      const companionGazeDmg = gazeCost(s.activeGazeTiles, s.companion.pos)
+      if (companionGazeDmg > 0) {
+        // Companion re-petrifies
+        s.petrification = Math.min(100, s.petrification + 40)
+        const msg = 'She steps into the gaze — stone again. (+40)'
+        this.bridge.pushMessage(msg, 'danger')
+        s.messages.unshift(msg)
+
+        // Return companion as statue at her current pos
+        const statueState = s.statueStates.find(ss => ss.def.id === s.companion!.sourceStatueId)
+        if (statueState) {
+          statueState.pos = { ...s.companion.pos }
+          statueState.isRestored = false
+          // Revert to stage 0
+          statueState.unlockedStageIndex = 0
+        }
+
+        s.companion = null
+      }
     }
 
     // Pick up items on player tile
@@ -418,7 +526,9 @@ export class GameScene extends Phaser.Scene {
         item.consumed = true
         s.inventory.push(item.itemType)
         const label = item.itemType === 'softening-oil' ? 'Softening Oil' : item.itemType
-        this.addMessage(`You pick up ${label}.`)
+        const msg = `You pick up ${label}.`
+        this.bridge.pushMessage(msg, 'good')
+        s.messages.unshift(msg)
       }
     }
 
@@ -435,7 +545,9 @@ export class GameScene extends Phaser.Scene {
         pos: { x: enemyDef.x, y: enemyDef.y },
         facing: enemyDef.gazePattern.facing,
       })
-      this.addMessage(`Something stirs in the dark — a ${enemyDef.type} appears!`)
+      const msg = `Something stirs in the dark — a ${enemyDef.type} appears!`
+      this.bridge.pushMessage(msg, 'danger')
+      s.messages.unshift(msg)
     }
 
     // Proximity unlocks for adjacent statues
@@ -444,13 +556,14 @@ export class GameScene extends Phaser.Scene {
       const dist = Math.abs(statue.pos.x - s.playerPos.x) + Math.abs(statue.pos.y - s.playerPos.y)
       if (dist <= 1) {
         statue.turnsAdjacent++
-        // Check turns-adjacent unlock conditions
         const def = statue.def
         for (let i = statue.unlockedStageIndex + 1; i < def.memoryStages.length; i++) {
           const cond = def.memoryStages[i].unlockCondition
           if (cond.type === 'turns-adjacent' && statue.turnsAdjacent >= cond.turns) {
             statue.unlockedStageIndex = i
-            this.addMessage(`A new memory stirs within ${def.name}...`)
+            const msg = `A new memory stirs within ${def.name}...`
+            this.bridge.pushMessage(msg)
+            s.messages.unshift(msg)
             break
           }
         }
@@ -461,7 +574,8 @@ export class GameScene extends Phaser.Scene {
     const currentTile = s.levelDef.tiles[s.playerPos.y]?.[s.playerPos.x]
     if (currentTile === 'exit') {
       s.phase = 'escaped'
-      this.addMessage('You reach the exit!')
+      this.bridge.pushMessage('You reach the exit!', 'good')
+      s.messages.unshift('You reach the exit!')
       this.render()
       return
     }
@@ -469,17 +583,13 @@ export class GameScene extends Phaser.Scene {
     // Check lose condition
     if (s.petrification >= 100) {
       s.phase = 'game-over'
-      this.addMessage('You have fully petrified.')
+      this.bridge.pushMessage('You have fully petrified.', 'danger')
+      s.messages.unshift('You have fully petrified.')
       this.render()
       return
     }
 
     this.render()
-  }
-
-  private addMessage(msg: string): void {
-    // Prepend so newest is at index 0
-    this.state.messages.unshift(msg)
   }
 
   private recomputeGaze(): void {
@@ -505,8 +615,8 @@ export class GameScene extends Phaser.Scene {
   render(): void {
     this.drawTilesAndGaze()
     this.drawEntities()
-    this.drawUI()
     this.drawOverlays()
+    this.bridge.updateStats(this.state)
   }
 
   private drawTilesAndGaze(): void {
@@ -539,6 +649,8 @@ export class GameScene extends Phaser.Scene {
             g.fillRect(px, py, TILE_SIZE, TILE_SIZE)
             g.lineStyle(2, 0x00ff88)
             g.strokeRect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4)
+            g.fillStyle(0x00ff88, 0.15)
+            g.fillRect(px, py, TILE_SIZE, TILE_SIZE)
             break
           default: // floor
             g.fillStyle(0x1e1e2e)
@@ -555,17 +667,6 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
-
-    // Exit glow label
-    for (let ty = 0; ty < levelDef.height; ty++) {
-      for (let tx = 0; tx < levelDef.width; tx++) {
-        if (levelDef.tiles[ty]?.[tx] === 'exit') {
-          const { px, py } = this.tileToPixel(tx, ty)
-          g.fillStyle(0x00ff88, 0.15)
-          g.fillRect(px, py, TILE_SIZE, TILE_SIZE)
-        }
-      }
-    }
   }
 
   private drawEntities(): void {
@@ -575,65 +676,88 @@ export class GameScene extends Phaser.Scene {
     }
     this.entityObjects = []
 
-    const { statueStates, enemyStates, itemStates, playerPos } = this.state
+    const g = this.graphics
+    const { statueStates, enemyStates, itemStates, playerPos, companion } = this.state
 
-    // Items (depth 2)
+    // Items (depth 2) — small oil bottle silhouette
     for (const item of itemStates) {
       if (item.consumed) continue
       const { px, py } = this.tileToPixel(item.pos.x, item.pos.y)
       const cx = px + TILE_SIZE / 2
       const cy = py + TILE_SIZE / 2
-      const circle = this.add.circle(cx, cy, 8, 0xffdd00)
-      circle.setDepth(2)
-      this.entityObjects.push(circle)
+      // Bottle body (yellow-brown rectangle)
+      g.fillStyle(0xccaa44)
+      g.fillRect(cx - 6, cy - 4, 12, 10)
+      // Bottle neck (small circle top)
+      g.fillStyle(0xaa8833)
+      g.fillRect(cx - 3, cy - 8, 6, 4)
+      g.fillCircle(cx, cy - 8, 3)
     }
 
-    // Statues (depth 3)
+    // Statues (depth 3) — marble silhouette
     for (const statue of statueStates) {
       if (statue.isRestored) continue
       const { px, py } = this.tileToPixel(statue.pos.x, statue.pos.y)
-      const size = TILE_SIZE * 0.8
-      const offset = (TILE_SIZE - size) / 2
-      const rect = this.add.rectangle(
-        px + TILE_SIZE / 2, py + TILE_SIZE / 2,
-        size, size,
-        statue.def.isPushable ? 0x7777bb : 0x5555aa
-      )
-      rect.setDepth(3)
-      // Name initial
+      const cx = px + TILE_SIZE / 2
+      const cy = py + TILE_SIZE / 2
+
+      // Body: light grey fill with darker outline
+      g.fillStyle(0xccccdd)
+      g.fillRect(cx - 12, cy - 8, 24, 24)
+      // Rounded head blob
+      g.fillCircle(cx, cy - 14, 10)
+      // Outline
+      g.lineStyle(1, 0xaaaacc)
+      g.strokeRect(cx - 12, cy - 8, 24, 24)
+      g.strokeCircle(cx, cy - 14, 10)
+
+      // Name initial label
       const initial = this.add.text(
-        px + TILE_SIZE / 2, py + TILE_SIZE / 2,
+        cx, cy + 6,
         statue.def.name[0],
-        { fontSize: '14px', color: '#ccccff', fontStyle: 'bold' }
-      ).setOrigin(0.5, 0.5)
-      initial.setDepth(3)
-      this.entityObjects.push(rect, initial)
+        { fontSize: '10px', color: '#555577', fontStyle: 'bold' }
+      ).setOrigin(0.5, 0.5).setDepth(3)
+      this.entityObjects.push(initial)
     }
 
     // Enemies (depth 4)
     for (const enemy of enemyStates) {
       const { px, py } = this.tileToPixel(enemy.pos.x, enemy.pos.y)
-      const size = TILE_SIZE * 0.75
-      const rect = this.add.rectangle(
-        px + TILE_SIZE / 2, py + TILE_SIZE / 2,
-        size, size,
-        0xcc2222
-      )
-      rect.setDepth(4)
+      const cx = px + TILE_SIZE / 2
+      const cy = py + TILE_SIZE / 2
 
-      // Facing indicator — small bright triangle/dot in facing direction
-      const facingOffsets: Record<string, [number, number]> = {
-        N: [0, -12], E: [12, 0], S: [0, 12], W: [-12, 0]
+      if (enemy.def.type === 'sentinel') {
+        // Sentinel: dark blue body
+        g.fillStyle(0x334466)
+        g.fillRect(cx - 14, cy - 14, 28, 28)
+        // Rotating eye indicator (direction dot)
+        const facingOffsets: Record<string, [number, number]> = {
+          N: [0, -10], E: [10, 0], S: [0, 10], W: [-10, 0]
+        }
+        const [fox, foy] = facingOffsets[enemy.facing] ?? [0, 0]
+        g.fillStyle(0xaabbff)
+        g.fillCircle(cx + fox, cy + foy, 4)
+        g.lineStyle(1, 0x6677aa)
+        g.strokeRect(cx - 14, cy - 14, 28, 28)
+      } else {
+        // Gorgon: dark red body
+        g.fillStyle(0xaa2222)
+        g.fillRect(cx - 14, cy - 14, 28, 28)
+        // Yellow eyes (2px dots)
+        g.fillStyle(0xffff00)
+        g.fillRect(cx - 6, cy - 4, 3, 3)
+        g.fillRect(cx + 3, cy - 4, 3, 3)
+        // Snake protrusions (4 short lines from top)
+        g.lineStyle(1, 0x88ff44)
+        g.lineBetween(cx - 6, cy - 14, cx - 8, cy - 20)
+        g.lineBetween(cx - 2, cy - 14, cx - 2, cy - 21)
+        g.lineBetween(cx + 2, cy - 14, cx + 2, cy - 21)
+        g.lineBetween(cx + 6, cy - 14, cx + 8, cy - 20)
+        g.lineStyle(1, 0x882222)
+        g.strokeRect(cx - 14, cy - 14, 28, 28)
       }
-      const [fox, foy] = facingOffsets[enemy.facing] ?? [0, 0]
-      const indicator = this.add.rectangle(
-        px + TILE_SIZE / 2 + fox,
-        py + TILE_SIZE / 2 + foy,
-        6, 6, 0xff6666
-      )
-      indicator.setDepth(4)
 
-      // Enemy type initial
+      // Type initial label
       const typeInitial: Record<string, string> = {
         'lesser-gorgon': 'G',
         'watcher': 'W',
@@ -642,146 +766,67 @@ export class GameScene extends Phaser.Scene {
         'boss': 'B',
       }
       const label = this.add.text(
-        px + TILE_SIZE / 2, py + TILE_SIZE / 2,
+        cx, cy + 2,
         typeInitial[enemy.def.type] ?? '?',
-        { fontSize: '16px', color: '#ffaaaa', fontStyle: 'bold' }
-      ).setOrigin(0.5, 0.5)
-      label.setDepth(4)
+        { fontSize: '10px', color: '#ffaaaa', fontStyle: 'bold' }
+      ).setOrigin(0.5, 0.5).setDepth(4)
+      this.entityObjects.push(label)
+    }
 
-      this.entityObjects.push(rect, indicator, label)
+    // Companion (depth 5, drawn before player so player is on top)
+    if (companion !== null) {
+      const { px, py } = this.tileToPixel(companion.pos.x, companion.pos.y)
+      const cx = px + TILE_SIZE / 2
+      const cy = py + TILE_SIZE / 2
+
+      // Same as player but slightly smaller and with blue tint overlay
+      // Hair (small rect top)
+      g.fillStyle(0x3a1f1f)
+      g.fillRect(cx - 8, cy - 19, 16, 6)
+      // Head (skin tone)
+      g.fillCircle(cx, cy - 14, 7)
+      g.fillStyle(0xc8956c)
+      g.fillCircle(cx, cy - 14, 7)
+      // Body
+      g.fillStyle(0x555588)
+      g.fillRect(cx - 7, cy - 7, 14, 14)
+      // Legs
+      g.fillStyle(0x5555aa)
+      g.fillRect(cx - 7, cy + 7, 6, 7)
+      g.fillRect(cx + 1, cy + 7, 6, 7)
+      // Feet
+      g.fillStyle(0x3333aa)
+      g.fillRect(cx - 8, cy + 13, 6, 2)
+      g.fillRect(cx + 2, cy + 13, 6, 2)
+      // Blue tint overlay
+      g.fillStyle(0x8888ff, 0.3)
+      g.fillRect(cx - 8, cy - 19, 16, 34)
     }
 
     // Player (depth 5)
-    const { px: ppx, py: ppy } = this.tileToPixel(playerPos.x, playerPos.y)
-    const playerCircle = this.add.circle(
-      ppx + TILE_SIZE / 2, ppy + TILE_SIZE / 2,
-      TILE_SIZE * 0.35,
-      0xffffff
-    )
-    playerCircle.setDepth(5)
-    const playerDot = this.add.circle(
-      ppx + TILE_SIZE / 2, ppy + TILE_SIZE / 2,
-      4, 0x1a1a2e
-    )
-    playerDot.setDepth(5)
-    this.entityObjects.push(playerCircle, playerDot)
-  }
+    {
+      const { px, py } = this.tileToPixel(playerPos.x, playerPos.y)
+      const cx = px + TILE_SIZE / 2
+      const cy = py + TILE_SIZE / 2
 
-  private drawUI(): void {
-    // Destroy previous UI texts
-    for (const obj of this.uiTexts) {
-      (obj as Phaser.GameObjects.Text).destroy()
+      // Hair (small rect top, white/light)
+      g.fillStyle(0xe8d8a0)
+      g.fillRect(cx - 9, cy - 20, 18, 7)
+      // Head (skin tone circle)
+      g.fillStyle(0xc8956c)
+      g.fillCircle(cx, cy - 14, 8)
+      // Body (dark rectangle)
+      g.fillStyle(0x444444)
+      g.fillRect(cx - 8, cy - 6, 16, 16)
+      // Legs (#666)
+      g.fillStyle(0x666666)
+      g.fillRect(cx - 8, cy + 10, 7, 8)
+      g.fillRect(cx + 1, cy + 10, 7, 8)
+      // Feet (#333)
+      g.fillStyle(0x333333)
+      g.fillRect(cx - 9, cy + 17, 7, 2)
+      g.fillRect(cx + 2, cy + 17, 7, 2)
     }
-    this.uiTexts = []
-
-    const ug = this.uiGraphics
-    ug.clear()
-
-    const { levelDef, turns, petrification, inventory, phase, messages } = this.state
-    const panelW = 1024 - UI_X
-    const panelH = 640
-
-    // Panel background
-    ug.fillStyle(0x111122)
-    ug.fillRect(UI_X, 0, panelW, panelH)
-    ug.lineStyle(1, 0x333355)
-    ug.strokeRect(UI_X, 0, panelW, panelH)
-
-    let ty = 12
-    const tx = UI_X + 10
-    const textWidth = panelW - 20
-
-    const addText = (text: string, opts: Phaser.Types.GameObjects.Text.TextStyle, x = tx, y = ty): Phaser.GameObjects.Text => {
-      const t = this.add.text(x, y, text, opts)
-      t.setDepth(10)
-      this.uiTexts.push(t)
-      return t
-    }
-
-    // Level name
-    addText(levelDef.name, { fontSize: '18px', color: '#aaaaee', fontStyle: 'bold' })
-    ty += 28
-
-    // Turns
-    const softStr = this.state.softLimitReached ? ' [LIMIT REACHED]' : ` / ${levelDef.softTurnLimit}`
-    addText(`Turn: ${turns}${softStr}`, { fontSize: '13px', color: '#888899' })
-    ty += 20
-
-    // Petrification label
-    addText('Petrification:', { fontSize: '13px', color: '#aaaaaa' })
-    ty += 18
-
-    // Petrification bar
-    const barX = tx
-    const barY = ty
-    const barW = textWidth
-    const barH = 16
-    ug.fillStyle(0x333333)
-    ug.fillRect(barX, barY, barW, barH)
-    const fillW = Math.round((petrification / 100) * barW)
-    // Colour interpolates: green → yellow → red
-    const barColor = petrification < 40 ? 0x44cc44
-      : petrification < 70 ? 0xcccc22
-      : petrification < 90 ? 0xcc6622
-      : 0xcc2222
-    ug.fillStyle(barColor)
-    ug.fillRect(barX, barY, fillW, barH)
-    ug.lineStyle(1, 0x555566)
-    ug.strokeRect(barX, barY, barW, barH)
-    addText(`${petrification}%`, { fontSize: '11px', color: '#ffffff' }, barX + 4, barY + 2)
-    ty += barH + 4
-
-    // Threshold label
-    const label = thresholdLabel(petrification)
-    const labelColor = petrification < 40 ? '#88cc88'
-      : petrification < 70 ? '#cccc44'
-      : petrification < 90 ? '#cc8844'
-      : '#cc4444'
-    addText(label, { fontSize: '12px', color: labelColor, fontStyle: 'italic' }, tx, ty)
-    ty += 20
-
-    // Phase indicator (push-pending etc.)
-    if (phase === 'push-pending' || this.pushPending) {
-      addText('> Push mode active', { fontSize: '12px', color: '#ffdd44' }, tx, ty)
-      ty += 18
-    }
-
-    ty += 6
-    // Inventory
-    addText('Inventory:', { fontSize: '13px', color: '#aaaaaa' })
-    ty += 18
-    if (inventory.length === 0) {
-      addText('(empty)', { fontSize: '12px', color: '#555566' }, tx, ty)
-      ty += 16
-    } else {
-      for (const item of inventory) {
-        const itemLabel = item === 'softening-oil' ? 'Softening Oil' : item
-        addText(`· ${itemLabel}`, { fontSize: '12px', color: '#ffdd88' }, tx, ty)
-        ty += 16
-      }
-    }
-
-    ty += 6
-    // Divider
-    ug.lineStyle(1, 0x333355)
-    ug.lineBetween(UI_X + 6, ty, UI_X + panelW - 6, ty)
-    ty += 8
-
-    // Message log label
-    addText('Log:', { fontSize: '12px', color: '#666677' }, tx, ty)
-    ty += 16
-
-    // Message log
-    this.messageLog.destroy()
-    this.messageLog = new MessageLog(this, tx, ty, textWidth)
-    this.messageLog.update(messages)
-
-    // Controls hint at bottom
-    const hintY = 600
-    ug.fillStyle(0x1a1a2e)
-    ug.fillRect(UI_X, hintY, panelW, 40)
-    addText('Arrow/WASD: Move   I: Inspect', { fontSize: '11px', color: '#444455' }, tx, hintY + 4)
-    addText('P: Push   U: Use item', { fontSize: '11px', color: '#444455' }, tx, hintY + 16)
   }
 
   private drawOverlays(): void {
@@ -798,21 +843,21 @@ export class GameScene extends Phaser.Scene {
   }
 
   private drawCenteredOverlay(headline: string, headlineColor: string, subtext: string): void {
-    // Semi-transparent dark overlay covering grid area only
+    // Semi-transparent dark overlay covering grid area
     const gridW = GRID_OFFSET_X + this.state.levelDef.width * TILE_SIZE + GRID_OFFSET_X
     const g = this.graphics
     g.fillStyle(0x000000, 0.65)
-    g.fillRect(0, 0, gridW, 640)
+    g.fillRect(0, 0, gridW, 576)
 
     const cx = gridW / 2
-    const headlineText = this.add.text(cx, 280, headline, {
-      fontSize: '36px',
+    const headlineText = this.add.text(cx, 260, headline, {
+      fontSize: '32px',
       color: headlineColor,
       fontStyle: 'bold',
     }).setOrigin(0.5, 0.5).setDepth(90)
 
-    const subtextObj = this.add.text(cx, 330, subtext, {
-      fontSize: '18px',
+    const subtextObj = this.add.text(cx, 305, subtext, {
+      fontSize: '16px',
       color: '#aaaaaa',
     }).setOrigin(0.5, 0.5).setDepth(90)
 

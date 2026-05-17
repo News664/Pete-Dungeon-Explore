@@ -1,0 +1,66 @@
+SPRITE SPECIFICATIONS — Escape from the Solid Labyrinth
+========================================================
+
+Purpose
+-------
+Pixel art sprites for all in-game entities. Currently rendered procedurally
+via Phaser Graphics. This file describes the spec for replacing them with
+PNG sprite files.
+
+Canvas size:   16 × 16 pixels logical (rendered at 3× = 48×48 in-game)
+Format:        PNG with transparency
+Style:         Limited palette (max 8 colours per sprite), black outlines,
+               no anti-aliasing, no gradients.
+Colour palette (suggested):
+  Background:  transparent
+  Outline:     #111111
+  Skin:        #c8956c
+  Hair (dark): #3a1f1f
+  Hair (light): #e8d8a0
+  Marble:      #ccccdd with #aaaacc shadow
+  Danger:      #cc2222
+  Accent:      #8888ff (companion tint)
+  Item:        #ccaa44
+
+File naming and entity mapping
+-------------------------------
+player_normal.png      Player character, default state
+player_stone_1.png     Player at 40%+ petrification (partial grey tint)
+player_stone_2.png     Player at 70%+ petrification (heavier greying)
+player_stone_3.png     Player at 90%+ petrification (nearly full stone)
+companion.png          Restored companion (Elena or other)
+statue_marble.png      Generic marble statue (non-restored)
+statue_trap.png        Trap statue (visually identical to statue_marble until triggered)
+statue_trap_active.png Trap statue after trigger
+enemy_gorgon.png       Lesser Gorgon / Watcher
+enemy_sentinel.png     Sentinel (add directional arrow overlay in code)
+enemy_gaze_trap.png    Gaze Trap entity
+item_oil.png           Softening Oil bottle (12×12, centred in 16×16)
+exit.png               Exit tile marker (archway glow, 16×16)
+
+Loading in code
+---------------
+Add to GameScene.preload():
+  this.load.image('player', 'assets/sprites/player_normal.png')
+  this.load.image('companion', 'assets/sprites/companion.png')
+  // etc.
+Then replace Graphics draw calls with:
+  this.add.image(px + 24, py + 24, 'player').setOrigin(0.5, 0.5)
+
+Character appearance reference (for sprite commissions)
+--------------------------------------------------------
+Player (adventurer):
+  Young woman, early 20s, dark outfit, determined expression.
+  No specific design locked yet — defer to artist.
+
+Elena (companion):
+  Early 20s, dark curly hair, crescent moon emblem on left shoulder.
+  Light scout armour. Expression: focused, slightly tired.
+
+Kessara (statue):
+  Early 20s, ash-blonde braid, scholar's robe, ink-stained hands.
+  Expression: calm, composed.
+
+Lesser Gorgon:
+  Snake-haired silhouette, glowing yellow eyes, dark green/red tones.
+  Stylised, not realistic.
