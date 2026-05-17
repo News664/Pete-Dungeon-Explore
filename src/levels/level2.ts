@@ -62,12 +62,16 @@ export const level2: LevelDefinition = {
       y: 6,
       name: 'Petra',
       material: 'marble',
+      appearance: 'Stocky build, middle-aged, with short-cropped hair and calloused hands. Wears a treasure hunter\'s vest with many pockets, most of them empty.',
+      job: 'Freelance treasure hunter and dungeon delver',
       pose: 'kneeling, arms extended as if offering something',
       backstory: 'A treasure hunter who ventured too deep. Her offering never reached its destination.',
       memoryStages: [
         {
-          text: 'Her weight surprises you — heavy marble, but balanced. You sense she would not mind being moved if it meant helping someone escape.',
           unlockCondition: { type: 'always' },
+          lines: [
+            { label: 'Memory', text: 'Her weight surprises you — heavy marble, but balanced. You sense she would not mind being moved if it meant helping someone escape.' },
+          ],
         },
       ],
       mechanicalRole: 'pushable-obstacle',

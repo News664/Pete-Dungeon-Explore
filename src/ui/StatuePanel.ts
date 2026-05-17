@@ -90,7 +90,7 @@ export class StatuePanel {
     const memoryLabel = this.scene.add.text(cx + 16, memoryY, 'Memory:', {
       fontSize: '13px', color: '#8888cc', fontStyle: 'italic'
     })
-    const memoryText = this.scene.add.text(cx + 16, memoryY + 20, memoryStage?.text ?? '', {
+    const memoryText = this.scene.add.text(cx + 16, memoryY + 20, memoryStage?.lines.map(l => `${l.label}: ${l.text}`).join('\n') ?? '', {
       fontSize: '13px', color: '#ccccee', wordWrap: { width: panelW - 32 }
     })
 

@@ -1,35 +1,54 @@
 /**
  * level1.ts — Level 1: The Antechamber
  *
- * Introduces: player movement, single cardinal gaze ray, exit.
- * Map: 14 wide × 10 tall.
- * Enemy: Lesser Gorgon at (9,4) facing W — gaze covers row 4, cols 1-8.
- * Player at (1,8). Exit at (12,8).
+ * Map: 16 wide × 12 tall. softTurnLimit: 35.
+ * Player at (1,10). Exit at (13,10).
  *
- * Puzzle: The direct east path along row 8 is blocked mid-level by a wall gap
- * that forces passage through row 4. The gorgon faces west covering cols 1-8 of row 4.
- * Player must go east past col 9 (behind the gorgon) to cross row 4 safely,
- * then south to the exit. Statue Mira at (2,2) teaches the gaze mechanic via memory.
+ * Enemies:
+ *   A — gorgon-1-a at (2,3) facing E, range 2.
+ *       Gaze covers (3,3) and (4,3) before hitting wall at col 5.
+ *       Teaches: wall blocks gaze.
+ *   B — gorgon-1-b at (11,3) facing S, range 8.
+ *       Gaze covers col 11, rows 4–10. Blocks direct path to exit.
+ *   C — gorgon-1-c at (8,4) facing S, range 2.
+ *       Gaze covers (8,5) and (8,6)=Kessara. Kessara blocks it.
+ *       Teaches: statue blocks gaze.
  *
- * Map layout (14×10):
- *   Row 0: ##############
- *   Row 1: #............#
- *   Row 2: #.S..........#  Mira at (2,2)
- *   Row 3: #############.  wall row with no gap on left — actually open top half
- *   Row 4: #........G...#  Gorgon at (9,4) facing W
- *   Row 5: ########.....#  wall row with gap cols 8-12
- *   Row 6: #.......#....#  wall in col 8 blocks direct south path
- *   Row 7: #.......#....#
- *   Row 8: #@......#...E#  player at (1,8), exit at (12,8), wall at col 8
- *   Row 9: ##############
+ * Statues:
+ *   Kessara at (8,6) — non-pushable, isOpaque, blocks enemy C's gaze passively.
+ *   Elena at (10,6)  — pushable, restorable ally. Using Oil on her removes enemy C.
+ *                      Pushing Elena east to (11,6) blocks enemy B's gaze from row 7 down,
+ *                      making the exit at (13,10) reachable.
  *
- * Solution: Player starts at (1,8). Cannot go directly east along row 8 past col 7
- * (wall at col 8 row 8). Must go north to row 4. Gorgon gaze covers row 4 cols 1-8.
- * Player must navigate to col 9+ on row 4 (safe), cross through the gap at col 8 row 5,
- * then south to exit at (12,8). To reach col 9 on row 4, go north through rows 7-4
- * on cols 1-7 — but that row 4 is gaze. So player goes up on the right side:
- * go north to row 1, cross east to col 10+, come south to row 4, col 10 (safe behind gorgon),
- * then south through the gap cols 9-12 row 5 to exit.
+ * Puzzle flow:
+ *   1. Enemy A teaches wall-blocks-gaze: short ray, visible stop at col-5 wall.
+ *   2. Enemy C faces south. Kessara (non-pushable) sits at (8,6) — passively blocking
+ *      C's gaze at (8,6). Teaches: statue-blocks-gaze.
+ *   3. Enemy B's full-height gaze along col 11 blocks exit at (13,10).
+ *      Player pushes Elena from (10,6) east to (11,6): stand at (9,6), push east.
+ *      Elena now blocks B's gaze from row 7 down. Exit becomes reachable.
+ *   4. Player picks up Softening Oil at (4,9).
+ *      Restoration safe approach: from west (10,6) or east (12,6).
+ *      Dangerous from south (11,7) — player enters B's gaze when Elena no longer blocks.
+ *      Using Oil on Elena: removes enemy C. Elena follows player (companion).
+ *   5. Reach exit at (13,10).
+ *
+ * Map string (exactly 16 chars per row, 12 rows):
+ *   '################'   row 0
+ *   '#..............#'   row 1
+ *   '#..............#'   row 2
+ *   '#.A..##.....B..#'   row 3   A at (2,3); wall cols 5-6; B at (11,3)
+ *   '#....##.C......#'   row 4   C at (8,4)
+ *   '#....##........#'   row 5
+ *   '#....##.K..E...#'   row 6   Kessara at (8,6); Elena at (11,6) after push
+ *   '#..............#'   row 7
+ *   '#..............#'   row 8
+ *   '#...O..........#'   row 9   Oil item at (4,9)
+ *   '#@...........E.#'   row 10  player at (1,10); exit at (13,10)
+ *   '################'   row 11
+ *
+ * Note: Entity positions (A, B, C, K) shown in map comment only — actual entities below.
+ *       'E' at (13,10) becomes 'exit' tile. All other non-'#' chars become 'floor'.
  */
 
 import type { LevelDefinition } from '../types/level'
@@ -48,58 +67,138 @@ function parseMap(rows: string[]): TileType[][] {
 export const level1: LevelDefinition = {
   id: 'level-1',
   name: 'The Antechamber',
-  width: 14,
-  height: 10,
-  softTurnLimit: 30,
+  width: 16,
+  height: 12,
+  softTurnLimit: 35,
   tiles: parseMap([
-    '##############',
-    '#............#',
-    '#.S..........#',
-    '#............#',
-    '#........G...#',
-    '########.....#',
-    '#.......#....#',
-    '#.......#....#',
-    '#@......#...E#',
-    '##############',
+    '################',
+    '#..............#',
+    '#..............#',
+    '#..............#',
+    '#....##........#',
+    '#....##........#',
+    '#....##........#',
+    '#..............#',
+    '#..............#',
+    '#..............#',
+    '#@...........E.#',
+    '################',
   ]),
-  playerStart: { x: 1, y: 8 },
+  playerStart: { x: 1, y: 10 },
   statues: [
     {
-      id: 'mira',
-      x: 2,
-      y: 2,
-      name: 'Mira',
+      id: 'kessara',
+      x: 8,
+      y: 6,
+      name: 'Kessara',
       material: 'marble',
-      pose: 'frozen mid-stride, one arm raised as if to warn someone',
-      backstory: 'A former dungeon guard who tried to warn the others. She was too slow.',
+      appearance: 'Slight build, early 20s, with pale ash-blonde hair kept in a tight functional braid. Wears a practical scholar\'s travelling robe — worn at the elbows — with a compass, folded parchment, and chalk clipped to her belt. Her hands are ink-stained.',
+      job: 'Junior expedition cartographer; mapping the dungeon for the first time',
+      pose: 'Standing completely upright, arms at her sides, eyes open and level. The only statue in the room that does not look afraid.',
+      backstory: 'She came in to map the dungeon and never came back. She is the reason Elena is here.',
+      portraitKey: undefined,
       memoryStages: [
         {
-          text: 'Her stone eyes are fixed on the centre of the room — on the gorgon\'s position. She knew. She was trying to warn you.',
           unlockCondition: { type: 'always' },
+          lines: [
+            { label: 'Her expression', text: 'Calm. Not resigned — decided. She saw it coming and chose her ground.' },
+            { label: 'The compass', text: 'Still clipped to her belt, pointing north. She was working until the very end.' },
+            { label: 'The parchment', text: 'Folded tight. Her last map, unfinished. Nobody will know what she found.' },
+            { label: 'Her hands', text: 'Ink-stained. She was twenty-one years old and already very good at this.' },
+          ],
         },
       ],
-      mechanicalRole: 'decorative',
+      mechanicalRole: 'blocks-gaze-only',
+      restorationCondition: undefined,
+      restorationEffect: undefined,
       isPushable: false,
+      isOpaque: true,
+      isTrap: false,
+    },
+    {
+      id: 'elena',
+      x: 10,
+      y: 6,
+      name: 'Elena',
+      material: 'marble',
+      appearance: 'Athletic build, early 20s, with dark curly hair pulled back under a leather headband. Wears light scout\'s leather armour with a crescent moon emblem on the left shoulder — the emblem is worn smooth, inherited rather than earned. Boots thick with road dust.',
+      job: 'Scout for the same surface expedition team as Kessara',
+      pose: 'Frozen mid-crouch, right arm outstretched toward Kessara\'s position across the room, mouth open mid-word. Left hand gripping a half-drawn dagger that she did not use.',
+      backstory: 'She came in after Kessara when Kessara stopped coming back. She almost made it to her.',
+      portraitKey: undefined,
+      memoryStages: [
+        {
+          unlockCondition: { type: 'always' },
+          lines: [
+            { label: 'Her eyes', text: 'Fixed on Kessara across the room — not on the gorgon. She was not trying to escape.' },
+            { label: 'The dagger', text: 'Half-drawn. She reached for it, then stopped. Too far, or a choice.' },
+            { label: 'The emblem', text: 'A crescent moon, worn smooth. She did not earn it — she carries it for someone.' },
+            { label: 'Her boots', text: 'Long-road dust. She travelled a great distance to end up three steps short.' },
+          ],
+        },
+        {
+          unlockCondition: { type: 'restored' },
+          lines: [
+            { label: 'She exhales', text: 'Stone dust from her lungs. She blinks slowly, then finds Kessara with her eyes.' },
+            { label: 'What she says', text: '\'I was calling to her.\' She doesn\'t look at you. \'She told me not to follow.\'' },
+            { label: 'What she does', text: 'She turns away from Kessara. When she finally looks at you: \'Let\'s go.\'' },
+          ],
+        },
+      ],
+      mechanicalRole: 'restorable-ally',
+      restorationCondition: 'Pour Softening Oil on her.',
+      restorationEffect: { type: 'remove-enemy', enemyId: 'gorgon-1-c' },
+      isPushable: true,
       isOpaque: true,
       isTrap: false,
     },
   ],
   enemies: [
     {
-      id: 'gorgon-1',
-      x: 9,
-      y: 4,
+      id: 'gorgon-1-a',
+      x: 2,
+      y: 3,
       type: 'lesser-gorgon',
       gazePattern: {
         type: 'cardinal-ray',
-        facing: 'W',
+        facing: 'E',
+        range: 2,
+        petrificationBonus: 2,
+        ignoresWalls: false,
+      },
+    },
+    {
+      id: 'gorgon-1-b',
+      x: 11,
+      y: 3,
+      type: 'lesser-gorgon',
+      gazePattern: {
+        type: 'cardinal-ray',
+        facing: 'S',
         range: 8,
         petrificationBonus: 3,
         ignoresWalls: false,
       },
     },
+    {
+      id: 'gorgon-1-c',
+      x: 8,
+      y: 4,
+      type: 'lesser-gorgon',
+      gazePattern: {
+        type: 'cardinal-ray',
+        facing: 'S',
+        range: 2,
+        petrificationBonus: 2,
+        ignoresWalls: false,
+      },
+    },
   ],
   hiddenEnemies: [],
-  items: [],
+  items: [
+    {
+      pos: { x: 4, y: 9 },
+      itemType: 'softening-oil',
+    },
+  ],
 }

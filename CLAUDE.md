@@ -98,6 +98,29 @@ Open-ended. Usually beneficial (unlock path, grant item, remove gaze source).
 Rare negative outcomes are valid (awakens enemy, blocks future path).
 Each level's author decides per-statue.
 
+### Overarching Lore — The Gorgon Queen
+The dungeon's statues are not accidents. The Gorgon Queen (boss, unnamed until late game) actively
+collects victims — specifically young women, early 20s or younger. This is her preference and the
+source of the dungeon's character.
+
+Implications for all authored content:
+- Statues encountered should be in their early 20s or younger unless there is a specific story
+  reason for an exception (e.g. a mentor figure who entered to find a younger companion).
+- The age constraint is intentional and should be reflected in `appearance` descriptions and
+  inspection dialogue — youth, interrupted futures, lives barely started.
+- The player character is also within this range.
+- This detail is never stated bluntly in-game; it emerges through the statues themselves.
+
+### Companion Mechanic
+When a statue is restored she becomes an active companion on the map:
+- Occupies the tile the player stood on the previous turn (follows one step behind).
+- Blocks gaze rays for all enemies (she is opaque and alive).
+- If she ends a turn inside any enemy gaze: re-petrifies instantly at her current tile.
+  - Player receives 40 petrification points (near-fatal, intentionally punishing a failed rescue).
+  - She returns to the map as a statue at her re-petrification position.
+  - Can be restored again if the player has more oil, at the same directional risk.
+- Only one companion active at a time.
+
 ### Level Structure
 - 3 hand-authored levels for initial build; level count is variable
 - Progression is linear (levels played in order)
@@ -106,9 +129,9 @@ Each level's author decides per-statue.
 
 | Level | Introduces |
 |---|---|
-| 1: The Antechamber | Basic movement, single cardinal gaze, exit |
-| 2: The Gallery | Pushable statues to block gaze |
-| 3: The Sanctuary | Softening Oil, restoration, soft turn limit pressure |
+| 1: The Antechamber | Gaze, wall/statue blocking, pushing, restoration, companion |
+| 2: The Gallery | Rotating enemy, multi-push puzzle, trap statue |
+| 3: The Sanctuary | Softening Oil as resource, soft turn limit pressure, hidden enemy |
 
 ### Inspect Action
 - Costs 1 turn (+1 petrification, or +2 after soft limit)

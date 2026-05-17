@@ -6,18 +6,22 @@
  *   GameState: complete mutable runtime state for the current level
  *   GamePhase: union of all valid game phases
  *
+ * Definitions:
+ *   GameState.companion: CompanionState | null — null until a statue is restored as ally
+ *
  * Invariants:
  *   - GameState is the single source of truth for the running game.
  *   - statueStates positions start from def.x/def.y.
  *   - enemyStates facing starts from def.gazePattern.facing.
  *   - messages is an append-only log (GameScene prepends new messages).
+ *   - companion starts null on every level load.
  */
 import type { LevelDefinition } from '../types/level'
 import type { HiddenEnemyDefinition } from '../types/entity'
 import type { ItemType } from '../types/item'
 import type { Vec2 } from '../types/tile'
 import type { GazeTile } from '../types/gaze'
-import type { StatueState, EnemyState, ItemState } from '../types/state'
+import type { StatueState, EnemyState, ItemState, CompanionState } from '../types/state'
 
 export type GamePhase = 'playing' | 'inspecting' | 'push-pending' | 'game-over' | 'escaped'
 
@@ -37,6 +41,7 @@ export interface GameState {
   messages: string[]
   phase: GamePhase
   inspectingStatue?: StatueState
+  companion: CompanionState | null
 }
 
 export function initGameState(levelDef: LevelDefinition, levelIndex: number): GameState {
@@ -67,7 +72,8 @@ export function initGameState(levelDef: LevelDefinition, levelIndex: number): Ga
     })),
     hiddenEnemies: [...levelDef.hiddenEnemies],
     activeGazeTiles: [],
-    messages: [`You enter ${levelDef.name}.`],
+    messages: [],
     phase: 'playing',
+    companion: null,
   }
 }

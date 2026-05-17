@@ -8,6 +8,7 @@ export type {
   Material,
   MechanicalRole,
   UnlockCondition,
+  InspectionLine,
   MemoryStage,
   RestorationEffect,
   StatueEntity,
@@ -16,4 +17,4 @@ export type {
   HiddenEnemyDefinition,
 } from './entity'
 export type { LevelDefinition } from './level'
-export type { StatueState, EnemyState, ItemState } from './state'
+export type { StatueState, EnemyState, ItemState, CompanionState } from './state'

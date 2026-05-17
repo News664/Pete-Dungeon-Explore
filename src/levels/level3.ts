@@ -65,16 +65,24 @@ export const level3: LevelDefinition = {
       y: 4,
       name: 'Lyra',
       material: 'marble',
+      appearance: 'Tall and lean, with long dark hair loose over her shoulders. Wears keeper\'s robes — formal but practical, with a ring of keys at her belt, one key missing.',
+      job: 'Keeper of the Sanctuary\'s gorgon — a hereditary post she did not choose',
       pose: 'reaching toward a torch bracket on the wall, expression of regret',
       backstory: 'The gorgon\'s keeper. She failed in her duty and was the first to pay the price.',
       memoryStages: [
         {
-          text: 'She\'s frozen reaching toward a torch bracket on the wall. Her expression is not fear — it\'s regret.',
           unlockCondition: { type: 'always' },
+          lines: [
+            { label: 'Her expression', text: 'She\'s frozen reaching toward a torch bracket on the wall. Her expression is not fear — it\'s regret.' },
+            { label: 'The key ring', text: 'One key is missing from the ring at her belt. Whatever it unlocked is still locked.' },
+          ],
         },
         {
-          text: 'She exhales slowly, marble returning to flesh. "The gorgon was mine to care for," she says. "I failed it. I\'m sorry you had to see this."',
           unlockCondition: { type: 'restored' },
+          lines: [
+            { label: 'She exhales', text: 'Marble returning to flesh. She breathes slowly, steadying herself.' },
+            { label: 'What she says', text: '"The gorgon was mine to care for," she says. "I failed it. I\'m sorry you had to see this."' },
+          ],
         },
       ],
       mechanicalRole: 'restorable-ally',

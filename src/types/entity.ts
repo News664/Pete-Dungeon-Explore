@@ -5,9 +5,11 @@
  *   Material: statue material (marble only initially; extensible)
  *   MechanicalRole: what a statue does while solid
  *   UnlockCondition: discriminated union of all memory-stage unlock triggers
+ *   InspectionLine: { label, text } — one labelled observation in a memory stage
  *   MemoryStage: one stage of a statue's lore, gated by an UnlockCondition
  *   RestorationEffect: what happens when statue is restored (discriminated union)
  *   StatueEntity: complete static definition of a statue (from level data)
+ *     New fields: appearance (physical description), job (role/occupation)
  *   EnemyType: all supported enemy kinds
  *   EnemyDefinition: static enemy spec including gaze pattern
  *   HiddenEnemyDefinition: { triggerTile, enemy } — enemy that spawns on tile step
@@ -16,6 +18,7 @@
  *   - memoryStages[0].unlockCondition must always be { type: 'always' }.
  *   - isTrap=true statues must have trapGazeRange defined.
  *   - portraitKey is a Phaser texture key; undefined means render placeholder rect.
+ *   - MemoryStage.lines is an array of InspectionLine (label + text pairs).
  */
 import type { Vec2 } from './tile'
 import type { GazePattern } from './gaze'
@@ -36,8 +39,13 @@ export type UnlockCondition =
   | { type: 'trigger-tile'; tile: Vec2 }
   | { type: 'item-used'; itemId: string }
 
+export interface InspectionLine {
+  label: string   // short focus label, e.g. "Her eyes", "The dagger"
+  text: string    // the observation text
+}
+
 export interface MemoryStage {
-  text: string
+  lines: InspectionLine[]
   unlockCondition: UnlockCondition
 }
 
@@ -54,6 +62,8 @@ export interface StatueEntity {
   y: number
   name: string
   material: Material
+  appearance: string
+  job: string
   pose: string
   backstory: string
   portraitKey?: string
