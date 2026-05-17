@@ -218,13 +218,16 @@ export class GameScene extends Phaser.Scene {
   // ─── Actions ───────────────────────────────────────────────────────────────
 
   private handleMove(dx: number, dy: number): void {
-    const { playerPos, levelDef, statueStates } = this.state
+    const { playerPos, levelDef, statueStates, enemyStates } = this.state
     const newX = playerPos.x + dx
     const newY = playerPos.y + dy
 
+    // Always update facing on attempted move, even if blocked
+    const facing = dx === 1 ? 'E' : dx === -1 ? 'W' : dy === -1 ? 'N' : 'S'
+    this.state.playerFacing = facing as import('../types/gaze').CardinalDirection
+
     // Bounds check
     if (newX < 0 || newY < 0 || newX >= levelDef.width || newY >= levelDef.height) {
-      this.bridge.pushMessage('You cannot go that way.')
       this.render()
       return
     }
@@ -232,7 +235,14 @@ export class GameScene extends Phaser.Scene {
     // Tile check
     const tile = levelDef.tiles[newY]?.[newX]
     if (tile === 'wall') {
-      this.bridge.pushMessage('A wall blocks your path.')
+      this.render()
+      return
+    }
+
+    // Enemy check — enemies are impassable
+    const enemyAtDest = enemyStates.find(e => e.pos.x === newX && e.pos.y === newY)
+    if (enemyAtDest) {
+      this.bridge.pushMessage('The creature blocks your path.', 'danger')
       this.render()
       return
     }
@@ -242,7 +252,7 @@ export class GameScene extends Phaser.Scene {
       s => !s.isRestored && s.pos.x === newX && s.pos.y === newY
     )
     if (statueAtDest) {
-      this.bridge.pushMessage(`${statueAtDest.def.name} blocks the way. Push with P.`)
+      this.bridge.pushMessage(`${statueAtDest.def.name} blocks the way.`)
       this.render()
       return
     }
@@ -803,6 +813,18 @@ export class GameScene extends Phaser.Scene {
       g.fillRect(cx - 8, cy - 19, 16, 34)
     }
 
+    // Facing indicator — highlight the tile the player is looking at
+    {
+      const facingVec = { N: {x:0,y:-1}, S: {x:0,y:1}, E: {x:1,y:0}, W: {x:-1,y:0} }[this.state.playerFacing]
+      const fx = playerPos.x + facingVec.x
+      const fy = playerPos.y + facingVec.y
+      if (fx >= 0 && fy >= 0 && fx < this.state.levelDef.width && fy < this.state.levelDef.height) {
+        const { px, py } = this.tileToPixel(fx, fy)
+        g.lineStyle(2, 0xffffff, 0.5)
+        g.strokeRect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4)
+      }
+    }
+
     // Player (depth 5)
     {
       const { px, py } = this.tileToPixel(playerPos.x, playerPos.y)
@@ -826,6 +848,14 @@ export class GameScene extends Phaser.Scene {
       g.fillStyle(0x333333)
       g.fillRect(cx - 9, cy + 17, 7, 2)
       g.fillRect(cx + 2, cy + 17, 7, 2)
+
+      // Facing arrow (small triangle toward faced tile)
+      g.fillStyle(0xffffff, 0.8)
+      const f = this.state.playerFacing
+      if (f === 'N') { g.fillTriangle(cx, cy - 22, cx - 4, cy - 16, cx + 4, cy - 16) }
+      else if (f === 'S') { g.fillTriangle(cx, cy + 20, cx - 4, cy + 14, cx + 4, cy + 14) }
+      else if (f === 'E') { g.fillTriangle(cx + 12, cy, cx + 6, cy - 4, cx + 6, cy + 4) }
+      else              { g.fillTriangle(cx - 12, cy, cx - 6, cy - 4, cx - 6, cy + 4) }
     }
   }
 
