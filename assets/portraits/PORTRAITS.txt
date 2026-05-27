@@ -7,7 +7,8 @@ Each statue has a portrait image shown in the inspect panel.
 Portraits are currently placeholder (grey rectangle in-game).
 This file describes the target spec for real artwork.
 
-Canvas size:   140 × 180 pixels (2:3.5 portrait ratio)
+Canvas size:   140 × 180 pixels for statue inspection portraits.
+               Player portrait is currently 160 × 280 pixels to match the left panel.
 Format:        PNG with transparency
 Colour space:  sRGB
 Style:         Stylised dungeon portrait, slightly desaturated,
@@ -22,19 +23,23 @@ Placement:     Drop files in this folder. In code, load them in GameScene.preloa
                  this.load.image('<statue-id>', 'assets/portraits/<statue-id>.png')
                Then set portraitKey: '<statue-id>' in the statue's level definition.
 
-Current statues needing portraits
-----------------------------------
+Current portraits
+-----------------
+Player:
+  player_mint.png  Adventurer portrait for the current single player character.
+                   Future character selection can add more player_<key>.png files.
+
 Level 1 — The Antechamber:
-  mira.png      Mira — frozen mid-stride, arm raised as a warning.
-                Expression: alarm, urgency.
+  kessara.png      Kessara — upright and composed, not afraid.
+  elena.png        Elena — frozen mid-crouch, arm outstretched in warning.
 
 Level 2 — The Gallery:
-  petra.png     Petra — kneeling, arms extended in offering.
-                Expression: calm resignation, slightly sorrowful.
+  petra.png        Petra — kneeling, arms extended in offering.
+                   Expression: calm resignation, slightly sorrowful.
 
 Level 3 — The Sanctuary:
-  lyra.png      Lyra — reaching toward a torch bracket, expression of regret.
-                Expression: regret, not fear. Eyes closed or cast downward.
+  lyra.png         Lyra — reaching toward a torch bracket, expression of regret.
+                   Expression: regret, not fear. Eyes closed or cast downward.
 
 AI generation prompt template (for future pipeline)
 -----------------------------------------------------

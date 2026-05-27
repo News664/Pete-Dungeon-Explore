@@ -66,6 +66,7 @@ export const level2: LevelDefinition = {
       job: 'Freelance treasure hunter and dungeon delver',
       pose: 'kneeling, arms extended as if offering something',
       backstory: 'A treasure hunter who ventured too deep. Her offering never reached its destination.',
+      portraitKey: 'petra',
       memoryStages: [
         {
           unlockCondition: { type: 'always' },

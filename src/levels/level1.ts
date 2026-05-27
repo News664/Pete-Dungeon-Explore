@@ -96,7 +96,7 @@ export const level1: LevelDefinition = {
       job: 'Junior expedition cartographer; mapping the dungeon for the first time',
       pose: 'Standing completely upright, arms at her sides, eyes open and level. The only statue in the room that does not look afraid.',
       backstory: 'She came in to map the dungeon and never came back. She is the reason Elena is here.',
-      portraitKey: undefined,
+      portraitKey: 'kessara',
       memoryStages: [
         {
           unlockCondition: { type: 'always' },
@@ -125,7 +125,7 @@ export const level1: LevelDefinition = {
       job: 'Scout for the same surface expedition team as Kessara',
       pose: 'Frozen mid-crouch, right arm outstretched toward Kessara\'s position across the room, mouth open mid-word. Left hand gripping a half-drawn dagger that she did not use.',
       backstory: 'She came in after Kessara when Kessara stopped coming back. She almost made it to her.',
-      portraitKey: undefined,
+      portraitKey: 'elena',
       memoryStages: [
         {
           unlockCondition: { type: 'always' },

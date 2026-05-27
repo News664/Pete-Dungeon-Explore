@@ -69,6 +69,7 @@ export const level3: LevelDefinition = {
       job: 'Keeper of the Sanctuary\'s gorgon — a hereditary post she did not choose',
       pose: 'reaching toward a torch bracket on the wall, expression of regret',
       backstory: 'The gorgon\'s keeper. She failed in her duty and was the first to pay the price.',
+      portraitKey: 'lyra',
       memoryStages: [
         {
           unlockCondition: { type: 'always' },
